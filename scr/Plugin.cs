@@ -96,7 +96,10 @@ namespace AutoCADEquipmentPlugin
                         return;
                     }
 
-                    BlockTableRecord btr = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+                    BlockTableRecord modelSpace = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+                    BlockTableRecord blockDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
+                    Extents3d ext = blockDef.GeometricExtents;
+                    double blockLength = (ext.MaxPoint - ext.MinPoint).X;
 
                     int numSegments = poly.NumberOfVertices;
                     for (int i = 0; i < numSegments; i++)
@@ -109,23 +112,60 @@ namespace AutoCADEquipmentPlugin
                         Vector3d dir = edge.GetNormal();
 
                         double length = edge.Length;
-                        using (BlockReference brRef = new BlockReference(Point3d.Origin, bt[blockName]))
+                        int count = (int)(length / (blockLength + offset));
+
+                        for (int j = 0; j < count; j++)
                         {
-                            BlockTableRecord brDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
-                            Extents3d ext = brDef.GeometricExtents;
-                            double blockLength = (ext.MaxPoint - ext.MinPoint).X;
+                            Point3d pos = pt1 + (dir * j * (blockLength + offset)) + perp;
+                            double angle = Math.Atan2(dir.Y, dir.X);
 
-                            int count = (int)(length / (blockLength + offset));
-                            for (int j = 0; j < count; j++)
+                            // Проверка — внутри ли точка
+                            if (!poly.IsPointInside(pos, Tolerance.Global, true))
+                                continue;
+
+                            BlockReference br = new BlockReference(pos, bt[blockName])
                             {
-                                Point3d pos = pt1 + (dir * j * (blockLength + offset)) + perp;
-                                double angle = Math.Atan2(dir.Y, dir.X);
+                                Rotation = angle
+                            };
 
-                                BlockReference br = new BlockReference(pos, bt[blockName]);
-                                br.Rotation = angle;
-                                btr.AppendEntity(br);
-                                tr.AddNewlyCreatedDBObject(br, true);
+                            // Проверка пересечения с другими объектами
+                            br.TransformBy(Matrix3d.Rotation(angle, Vector3d.ZAxis, pos));
+                            br.ScaleFactors = new Scale3d(1); // Убедимся, что масштаб 1:1
+
+                            modelSpace.AppendEntity(br);
+                            tr.AddNewlyCreatedDBObject(br, true);
+
+                            // Проверка пересечения после добавления
+                            bool intersects = false;
+                            foreach (ObjectId entId in modelSpace)
+                            {
+                                if (entId == br.ObjectId) continue;
+                                Entity ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
+                                if (ent != null && br.GeometricExtents.IntersectWith(ent.GeometricExtents).HasValue)
+                                {
+                                    intersects = true;
+                                    break;
+                                }
                             }
+
+                            if (intersects)
+                            {
+                                br.Erase(); // Удалить если пересекается
+                            }
+                        }
+
+                        // "Умная" вставка в углу
+                        Point3d corner = pt2 + perp;
+                        if (poly.IsPointInside(corner, Tolerance.Global, true))
+                        {
+                            BlockReference cornerBr = new BlockReference(corner, bt[blockName])
+                            {
+                                Rotation = Math.Atan2(dir.Y, dir.X),
+                                ScaleFactors = new Scale3d(1)
+                            };
+
+                            modelSpace.AppendEntity(cornerBr);
+                            tr.AddNewlyCreatedDBObject(cornerBr, true);
                         }
                     }
 
@@ -138,6 +178,15 @@ namespace AutoCADEquipmentPlugin
             {
                 ed.WriteMessage("\nОшибка: " + ex.Message);
             }
+        }
+    }
+
+    public static class PolylineExtensions
+    {
+        // Быстрая проверка: точка внутри полилинии
+        public static bool IsPointInside(this Polyline poly, Point3d point, Tolerance tolerance, bool useEvenOdd)
+        {
+            return poly.Contains(point);
         }
     }
 }
