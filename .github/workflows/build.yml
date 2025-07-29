@@ -18,10 +18,10 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Restore NuGet packages
-      run: nuget restore src/AutoCADEquipmentPlugin.csproj
+      run: nuget restore scr/AutoCADEquipmentPlugin.csproj
 
     - name: Build solution
-      run: msbuild src/AutoCADEquipmentPlugin.csproj /p:Configuration=Release /p:Platform="Any CPU"
+      run: msbuild scr/AutoCADEquipmentPlugin.csproj /p:Configuration=Release /p:Platform="Any CPU"
 
     - name: Upload compiled DLL
       uses: actions/upload-artifact@v3
