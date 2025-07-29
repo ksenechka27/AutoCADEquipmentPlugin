@@ -1,4 +1,4 @@
-using System;
+pusing System;
 using System.Linq;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
@@ -20,7 +20,7 @@ namespace AutoCADEquipmentPlugin
 
         public void Terminate() { }
 
-        [CommandMethod("PlaceWithUI")]
+        [CommandMethod("eqp")]
         public void PlaceWithUI()
         {
             Application.ShowModalDialog(new PlaceForm());
