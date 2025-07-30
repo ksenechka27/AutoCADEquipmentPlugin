@@ -1,4 +1,3 @@
-using System;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
@@ -11,12 +10,11 @@ namespace AutoCADEquipmentPlugin
     {
         public void Initialize()
         {
-            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\nAutoCADEquipmentPlugin загружен. Используйте команду EQP.");
+            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\nПлагин загружен. Команда: EQP.");
         }
-
         public void Terminate() { }
 
-        [CommandMethod("eqp")]
+        [CommandMethod("EQP")]
         public void RunWithUI()
         {
             Application.ShowModalDialog(new UI.PlaceForm());
