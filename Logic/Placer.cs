@@ -42,8 +42,14 @@ namespace AutoCADEquipmentPlugin.Logic
                         return;
                     }
 
-                    BlockTableRecord brDef = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
-                    if (brDef.Name == blockName)
+                    BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+                    BlockTableRecord brDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
+
+                    if (!brDef.Bounds.HasValue)
+                    {
+                        ed.WriteMessage("\nБлок не содержит геометрии.");
+                        return;
+                    }
 
                     if (clearOld)
                     {
@@ -57,17 +63,7 @@ namespace AutoCADEquipmentPlugin.Logic
                         }
                     }
 
-                    double totalLength = 0;
-                    for (int i = 0; i < poly.NumberOfVertices; i++)
-                    {
-                        Point3d pt1 = poly.GetPoint3dAt(i);
-                        Point3d pt2 = poly.GetPoint3dAt((i + 1) % poly.NumberOfVertices);
-                        Vector3d edge = pt2 - pt1;
-                        totalLength += edge.Length;
-                    }
-
-                    BlockTableRecord brDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
-                    Extents3d ext = brDef.GeometricExtents;
+                    Extents3d ext = brDef.Bounds.Value;
                     double blockLength = (ext.MaxPoint - ext.MinPoint).X;
 
                     for (int i = 0; i < poly.NumberOfVertices; i++)
@@ -86,7 +82,10 @@ namespace AutoCADEquipmentPlugin.Logic
                             Point3d pos = pt1 + unit * (j * (blockLength + offset)) + perp;
                             double angle = Math.Atan2(unit.Y, unit.X);
 
-                            BlockReference br = new BlockReference(pos, brDef.ObjectId) { Rotation = angle };
+                            BlockReference br = new BlockReference(pos, brDef.ObjectId)
+                            {
+                                Rotation = angle
+                            };
 
                             if (!Utils.IsPointInside(poly, pos)) continue;
                             if (Utils.IntersectsOtherObjects(ms, br, tr)) continue;
@@ -95,7 +94,7 @@ namespace AutoCADEquipmentPlugin.Logic
                             tr.AddNewlyCreatedDBObject(br, true);
                         }
 
-                        // угловой блок
+                        // Угловой блок
                         Point3d corner = pt2 + perp;
                         if (Utils.IsPointInside(poly, corner))
                         {
