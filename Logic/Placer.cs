@@ -56,13 +56,13 @@ namespace AutoCADEquipmentPlugin.Logic
                     for (int j = 0; j < count; j++)
                     {
                         var pos = p1 + dir * (j * (blockLength + offset)) + perp;
-                        if (!Utils.IsPointInside(poly, pos)) continue;
+                        if (!GeometryUtils.IsPointInside(poly, pos)) continue;
 
                         var br = new BlockReference(pos, brDef.ObjectId)
                         {
                             Rotation = System.Math.Atan2(dir.Y, dir.X)
                         };
-                        if (Utils.IntersectsOther(ms, br, tr)) continue;
+                        if (GeometryUtils.IntersectsOther(ms, br, tr)) continue;
 
                         ms.AppendEntity(br);
                         tr.AddNewlyCreatedDBObject(br, true);
@@ -70,13 +70,13 @@ namespace AutoCADEquipmentPlugin.Logic
 
                     // угловой блок
                     var corner = p2 + perp;
-                    if (Utils.IsPointInside(poly, corner))
+                    if (GeometryUtils.IsPointInside(poly, corner))
                     {
                         var cb = new BlockReference(corner, brDef.ObjectId)
                         {
                             Rotation = System.Math.Atan2(dir.Y, dir.X)
                         };
-                        if (!Utils.IntersectsOther(ms, cb, tr))
+                        if (!GeometryUtils.IntersectsOther(ms, cb, tr))
                         {
                             ms.AppendEntity(cb);
                             tr.AddNewlyCreatedDBObject(cb, true);
