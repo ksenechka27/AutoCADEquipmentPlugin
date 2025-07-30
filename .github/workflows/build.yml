@@ -22,8 +22,10 @@ jobs:
     - name: Restore NuGet packages
       run: dotnet restore
       
-    - name: Build Plugin.csproj
-      run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\PluginOutput\
+    - name: Build Plugin
+      run: |
+        msbuild Plugin.csproj /p:Configuration=Release /p:Platform="x64" /p:OutputPath=bin\PluginOutput\
+
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
