@@ -12,14 +12,20 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
-    <Reference Include="AcCoreMgd">
-      <HintPath>libs\AcCoreMgd.dll</HintPath>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="acmgd">
+      <HintPath>libs\acmgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
-    <Reference Include="AcDbMgd">
-      <HintPath>libs\AcDbMgd.dll</HintPath>
+    <Reference Include="acdbmgd">
+      <HintPath>libs\acdbmgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
-    <Reference Include="AcMgd">
-      <HintPath>libs\AcMgd.dll</HintPath>
+    <Reference Include="accoremgd">
+      <HintPath>libs\accoremgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
 
@@ -29,5 +35,4 @@
     <Compile Include="PlaceForm.cs" />
     <Compile Include="Utils.cs" />
   </ItemGroup>
-
 </Project>
