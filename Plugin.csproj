@@ -10,10 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
     <Reference Include="acdbmgd">
       <HintPath>libs\acdbmgd.dll</HintPath>
       <Private>false</Private>
@@ -36,6 +32,8 @@
   </ItemGroup>
 
   <Target Name="Build">
-    <Csc Sources="@(Compile)" References="@(Reference)" OutputAssembly="$(OutputPath)\AutoCADEquipmentPlugin.dll" />
+    <Csc Sources="@(Compile)"
+         References="@(Reference)"
+         OutputAssembly="$(OutputPath)\AutoCADEquipmentPlugin.dll" />
   </Target>
 </Project>
