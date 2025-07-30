@@ -1,37 +1,27 @@
-name: Build AutoCAD Plugin
+name: Build AutoCADEquipmentPlugin
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
-
-permissions:
-  contents: read
 
 jobs:
   build:
-    name: Build Plugin Without SLN
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v1.1
-        with:
-          vs-version: 'latest'
+        uses: microsoft/setup-msbuild@v1.3.1
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1.2.0
 
       - name: Restore NuGet packages
-        run: nuget restore Plugin.csproj
+        run: nuget restore Plugin/Plugin.csproj
 
-      - name: Build Plugin.csproj
-        run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\PluginOutput\
-
-      - name: Upload compiled DLL
-        uses: actions/upload-artifact@v4
-        with:
-          name: AutoCADPlugin
-          path: |
-            bin/PluginOutput/*.dll
+      - name: Build Plugin project
+        run: msbuild Plugin/Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin/PluginOutput
