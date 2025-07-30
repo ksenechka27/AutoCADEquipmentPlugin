@@ -1,6 +1,8 @@
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
+using AutoCADEquipmentPlugin.Logic;
+
 
 [assembly: CommandClass(typeof(AutoCADEquipmentPlugin.Plugin))]
 
