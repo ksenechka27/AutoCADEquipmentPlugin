@@ -1,38 +1,39 @@
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+using System;
+using System.Collections.Generic;
 
-namespace AutoCADEquipmentPlugin.Geometry
+public static class GeometryUtils
 {
-    public static class Utils
+    public static bool IsPointInside(this Polyline pline, Point2d pt, Tolerance tolerance)
     {
-        public static bool IsPointInside(Polyline poly, Point3d p)
-        {
-            return poly.GetArea() > 0 && poly.IsPointInside(p, new Tolerance(1e-6, 1e-4), true);
-        }
+        if (!pline.Closed) return false;
 
-        public static bool IntersectsOther(BlockTableRecord ms, BlockReference br, Transaction tr)
-        {
-            var bb = br.Bounds;
-            if (!bb.HasValue) return false;
+        int windingNumber = 0;
+        int numVerts = pline.NumberOfVertices;
 
-            foreach (var oid in ms)
+        for (int i = 0; i < numVerts; i++)
+        {
+            Point2d p1 = pline.GetPoint2dAt(i);
+            Point2d p2 = pline.GetPoint2dAt((i + 1) % numVerts);
+
+            if (p1.Y <= pt.Y)
             {
-                if (oid == br.ObjectId) continue;
-                var ent = tr.GetObject(oid, OpenMode.ForRead) as Entity;
-                if (ent is BlockReference obr)
-                {
-                    var ob = obr.Bounds;
-                    if (ob.HasValue &&
-                        bb.Value.MinPoint.X < ob.Value.MaxPoint.X &&
-                        bb.Value.MaxPoint.X > ob.Value.MinPoint.X &&
-                        bb.Value.MinPoint.Y < ob.Value.MaxPoint.Y &&
-                        bb.Value.MaxPoint.Y > ob.Value.MinPoint.Y)
-                    {
-                        return true;
-                    }
-                }
+                if (p2.Y > pt.Y && IsLeft(p1, p2, pt) > 0)
+                    windingNumber++;
             }
-            return false;
+            else
+            {
+                if (p2.Y <= pt.Y && IsLeft(p1, p2, pt) < 0)
+                    windingNumber--;
+            }
         }
+
+        return windingNumber != 0;
+    }
+
+    private static double IsLeft(Point2d p0, Point2d p1, Point2d p2)
+    {
+        return (p1.X - p0.X) * (p2.Y - p0.Y) - (p2.X - p0.X) * (p1.Y - p0.Y);
     }
 }
