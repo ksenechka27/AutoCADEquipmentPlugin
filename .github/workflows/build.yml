@@ -1,32 +1,24 @@
-name: Build AutoCAD Plugin
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up MSBuild
-      uses: microsoft/setup-msbuild@v2
-      with:
-        vs-version: 'latest'
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: 'latest'
 
-    - name: Restore NuGet packages (optional, can be skipped)
-      run: echo "No packages to restore"
+      - name: Restore NuGet packages (optional, can be skipped)
+        run: echo "No packages to restore"
 
-    - name: Build solution
-      run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU"
-      
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: AutoCADPlugin
-        path: bin\PluginOutput\
+      - name: Build solution
+        run: msbuild AutoCADEquipmentPlugin/AutoCADEquipmentPlugin/Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoCADPlugin
+          path: AutoCADEquipmentPlugin/AutoCADEquipmentPlugin/bin/PluginOutput/
