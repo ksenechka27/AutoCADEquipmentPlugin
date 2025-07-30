@@ -5,6 +5,7 @@
     <OutputType>Library</OutputType>
     <OutputPath>bin\PluginOutput\</OutputPath>
     <Platforms>AnyCPU</Platforms>
+    <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
