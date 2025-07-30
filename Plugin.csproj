@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework> <!-- AutoCAD 2016 совместим с .NET Framework 4.8 -->
+    <TargetFramework>net48</TargetFramework>
     <OutputType>Library</OutputType>
     <RootNamespace>AutoCADEquipmentPlugin</RootNamespace>
     <AssemblyName>AutoCADEquipmentPlugin</AssemblyName>
+    <OutputPath>bin\PluginOutput\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
