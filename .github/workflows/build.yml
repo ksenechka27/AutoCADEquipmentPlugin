@@ -1,9 +1,11 @@
-name: Build AutoCADEquipmentPlugin
+name: Build AutoCAD Plugin
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.yml'
   pull_request:
 
 jobs:
@@ -14,14 +16,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v1.3.1
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: 'latest'
 
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v1.2.0
+      - name: Build solution
+        run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU"
 
-      - name: Restore NuGet packages
-        run: nuget restore Plugin/Plugin.csproj
-
-      - name: Build Plugin project
-        run: msbuild Plugin/Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin/PluginOutput
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoCADPlugin
+          path: bin\PluginOutput\
