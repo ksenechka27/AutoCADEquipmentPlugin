@@ -1,11 +1,32 @@
-<ItemGroup>
-  <Reference Include="AcCoreMgd">
-    <HintPath>libs\accoremgd.dll</HintPath>
-  </Reference>
-  <Reference Include="AcDbMgd">
-    <HintPath>libs\acdbmgd.dll</HintPath>
-  </Reference>
-  <Reference Include="AcMgd">
-    <HintPath>libs\acmgd.dll</HintPath>
-  </Reference>
-</ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework> <!-- AutoCAD 2016 совместим с .NET Framework 4.8 -->
+    <OutputType>Library</OutputType>
+    <RootNamespace>AutoCADEquipmentPlugin</RootNamespace>
+    <AssemblyName>AutoCADEquipmentPlugin</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="acdbmgd">
+      <HintPath>libs\acdbmgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="acmgd">
+      <HintPath>libs\acmgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="accoremgd">
+      <HintPath>libs\accoremgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Plugin.cs" />
+    <Compile Include="Geometry\Utils.cs" />
+    <Compile Include="Logic\Placer.cs" />
+    <Compile Include="UI\PlaceForm.cs" />
+  </ItemGroup>
+
+</Project>
