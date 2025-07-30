@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build on Windows
+    name: Build Plugin Without SLN
     runs-on: windows-latest
 
     steps:
@@ -23,15 +23,12 @@ jobs:
         with:
           vs-version: 'latest'
 
-      - name: Restore NuGet packages
-        run: nuget restore AutoCADEquipmentPlugin.sln
+      - name: Build Plugin.csproj
+        run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\PluginOutput\
 
-      - name: Build Plugin project
-        run: msbuild AutoCADEquipmentPlugin.sln /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\PluginOutput\
-
-      - name: Upload plugin DLL
+      - name: Upload compiled DLL
         uses: actions/upload-artifact@v4
         with:
           name: AutoCADPlugin
           path: |
-            **/bin/PluginOutput/*.dll
+            bin/PluginOutput/*.dll
