@@ -5,7 +5,7 @@ using AutoCADEquipmentPlugin.Geometry;
 
 [assembly: CommandClass(typeof(AutoCADEquipmentPlugin.Plugin))]
 
-namespace AutoCADEquipmentPlugin.Geometry
+namespace AutoCADEquipmentPlugin
 {
     public class Plugin : IExtensionApplication
     {
