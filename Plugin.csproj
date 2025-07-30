@@ -2,37 +2,32 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <OutputPath>bin\PluginOutput\</OutputPath>
     <RootNamespace>AutoCADEquipmentPlugin</RootNamespace>
     <AssemblyName>AutoCADEquipmentPlugin</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="acdbmgd">
+      <HintPath>libs\acdbmgd.dll</HintPath>
+    </Reference>
+    <Reference Include="acmgd">
+      <HintPath>libs\acmgd.dll</HintPath>
+    </Reference>
+    <Reference Include="accoremgd">
+      <HintPath>libs\accoremgd.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="acmgd">
-      <HintPath>libs\acmgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="acdbmgd">
-      <HintPath>libs\acdbmgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="accoremgd">
-      <HintPath>libs\accoremgd.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
     <Compile Include="Plugin.cs" />
+    <Compile Include="Geometry\Utils.cs" />
     <Compile Include="Logic\Placer.cs" />
     <Compile Include="UI\PlaceForm.cs" />
-    <Compile Include="Geometry\Utils.cs" />
   </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
