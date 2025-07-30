@@ -23,6 +23,9 @@ jobs:
         with:
           vs-version: 'latest'
 
+      - name: Restore NuGet packages
+        run: nuget restore Plugin.csproj
+
       - name: Build Plugin.csproj
         run: msbuild Plugin.csproj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=bin\PluginOutput\
 
