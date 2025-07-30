@@ -1,12 +1,11 @@
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
-using AutoCADEquipmentPlugin.Logic;
-
+using AutoCADEquipmentPlugin.Geometry;
 
 [assembly: CommandClass(typeof(AutoCADEquipmentPlugin.Plugin))]
 
-namespace AutoCADEquipmentPlugin
+namespace AutoCADEquipmentPlugin.Geometry
 {
     public class Plugin : IExtensionApplication
     {
