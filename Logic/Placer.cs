@@ -42,7 +42,8 @@ namespace AutoCADEquipmentPlugin.Logic
                         return;
                     }
 
-                    BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+                    BlockTableRecord brDef = (BlockTableRecord)tr.GetObject(br.BlockTableRecord, OpenMode.ForRead);
+                    if (brDef.Name == blockName)
 
                     if (clearOld)
                     {
