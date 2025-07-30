@@ -22,11 +22,4 @@
     <Reference Include="System.Drawing" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Compile Include="Geometry\*.cs" />
-    <Compile Include="Logic\*.cs" />
-    <Compile Include="UI\*.cs" />
-    <Compile Include="Plugin.cs" />
-  </ItemGroup>
-
 </Project>
