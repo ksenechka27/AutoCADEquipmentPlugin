@@ -2,67 +2,59 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using System.Collections.Generic;
 
-namespace AutoCADEquipmentPlugin.Geometry
+namespace AutoCADEquipmentPlugin
 {
     public static class GeometryUtils
     {
-        // Проверка: точка внутри замкнутой полилинии
-        public static bool IsPointInside(Polyline polyline, Point3d point)
+        /// <summary>
+        /// Проверяет, находится ли точка внутри замкнутого полигона.
+        /// </summary>
+        public static bool IsPointInside(Point3d point, Polyline polyline)
         {
-            var pts = new Point3dCollection();
+            if (polyline == null || !polyline.Closed)
+                return false;
+
+            int numIntersections = 0;
+            Point3d p1, p2;
+
             for (int i = 0; i < polyline.NumberOfVertices; i++)
             {
-                pts.Add(polyline.GetPoint3dAt(i));
+                p1 = polyline.GetPoint3dAt(i);
+                p2 = polyline.GetPoint3dAt((i + 1) % polyline.NumberOfVertices);
+
+                if (IsEdgeCrossingHorizontalRay(point, p1, p2))
+                    numIntersections++;
             }
 
-            return IsPointInside(pts, point);
+            return numIntersections % 2 == 1;
         }
 
-        // Вспомогательный метод: точка в многоугольнике (Ray Casting)
-        public static bool IsPointInside(Point3dCollection polygon, Point3d point)
+        /// <summary>
+        /// Проверка, пересекает ли отрезок (p1-p2) горизонтальный луч вправо от точки point.
+        /// </summary>
+        private static bool IsEdgeCrossingHorizontalRay(Point3d point, Point3d p1, Point3d p2)
         {
-            int crossings = 0;
-            for (int i = 0; i < polygon.Count; i++)
+            if (p1.Y > p2.Y)
             {
-                Point3d a = polygon[i];
-                Point3d b = polygon[(i + 1) % polygon.Count];
-
-                if (((a.Y <= point.Y) && (b.Y > point.Y)) || ((a.Y > point.Y) && (b.Y <= point.Y)))
-                {
-                    double vt = (double)(point.Y - a.Y) / (b.Y - a.Y);
-                    double intersectX = a.X + vt * (b.X - a.X);
-                    if (point.X < intersectX)
-                        crossings++;
-                }
-            }
-            return (crossings % 2) != 0;
-        }
-
-        // Проверка пересечений с другими объектами в модели
-        public static bool IntersectsOther(BlockTableRecord ms, BlockReference br, Transaction tr)
-        {
-            if (br.Bounds == null) return false;
-
-            Extents3d brBounds = br.Bounds.Value;
-
-            foreach (ObjectId id in ms)
-            {
-                if (id == br.ObjectId) continue;
-
-                Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent == null || ent.Bounds == null) continue;
-
-                Extents3d entBounds = ent.Bounds.Value;
-
-                // Простая проверка на пересечение границ
-                if (brBounds.MinPoint.X <= entBounds.MaxPoint.X && brBounds.MaxPoint.X >= entBounds.MinPoint.X &&
-                    brBounds.MinPoint.Y <= entBounds.MaxPoint.Y && brBounds.MaxPoint.Y >= entBounds.MinPoint.Y)
-                {
-                    return true;
-                }
+                var temp = p1;
+                p1 = p2;
+                p2 = temp;
             }
 
-            return false;
+            // Быстрая фильтрация по вертикали
+            if (point.Y <= p1.Y || point.Y > p2.Y)
+                return false;
+
+            // Проверка пересечения по X
+            double dx = p2.X - p1.X;
+            double dy = p2.Y - p1.Y;
+
+            if (dy == 0)
+                return false; // горизонтальный сегмент — не пересекает
+
+            double intersectionX = p1.X + (point.Y - p1.Y) * dx / dy;
+
+            return intersectionX > point.X;
         }
     }
 }
