@@ -4,7 +4,6 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using AutoCADEquipmentPlugin.Geometry;
 using System;
-using System.Linq;
 
 namespace AutoCADEquipmentPlugin.Logic
 {
@@ -42,14 +41,14 @@ namespace AutoCADEquipmentPlugin.Logic
                         return;
                     }
 
-                    BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
                     BlockTableRecord brDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
-
                     if (!brDef.Bounds.HasValue)
                     {
                         ed.WriteMessage("\nБлок не содержит геометрии.");
                         return;
                     }
+
+                    BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
 
                     if (clearOld)
                     {
@@ -82,10 +81,7 @@ namespace AutoCADEquipmentPlugin.Logic
                             Point3d pos = pt1 + unit * (j * (blockLength + offset)) + perp;
                             double angle = Math.Atan2(unit.Y, unit.X);
 
-                            BlockReference br = new BlockReference(pos, brDef.ObjectId)
-                            {
-                                Rotation = angle
-                            };
+                            BlockReference br = new BlockReference(pos, brDef.ObjectId) { Rotation = angle };
 
                             if (!Utils.IsPointInside(poly, pos)) continue;
                             if (Utils.IntersectsOtherObjects(ms, br, tr)) continue;
@@ -94,7 +90,7 @@ namespace AutoCADEquipmentPlugin.Logic
                             tr.AddNewlyCreatedDBObject(br, true);
                         }
 
-                        // Угловой блок
+                        // угловой блок
                         Point3d corner = pt2 + perp;
                         if (Utils.IsPointInside(poly, corner))
                         {
@@ -115,7 +111,7 @@ namespace AutoCADEquipmentPlugin.Logic
                     ed.WriteMessage("\nОборудование размещено.");
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 ed.WriteMessage("\nОшибка: " + ex.Message);
             }
