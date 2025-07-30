@@ -1,0 +1,11 @@
+<ItemGroup>
+  <Reference Include="AcCoreMgd">
+    <HintPath>libs\accoremgd.dll</HintPath>
+  </Reference>
+  <Reference Include="AcDbMgd">
+    <HintPath>libs\acdbmgd.dll</HintPath>
+  </Reference>
+  <Reference Include="AcMgd">
+    <HintPath>libs\acmgd.dll</HintPath>
+  </Reference>
+</ItemGroup>
