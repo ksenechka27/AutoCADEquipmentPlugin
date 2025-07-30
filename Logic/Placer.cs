@@ -44,6 +44,8 @@ namespace AutoCADEquipmentPlugin.Logic
                 var ext = brDef.Bounds.Value;
                 double blockLength = (ext.MaxPoint - ext.MinPoint).X;
 
+                const double tolerance = 0.001;
+
                 for (int i = 0; i < poly.NumberOfVertices; i++)
                 {
                     var p1 = poly.GetPoint3dAt(i);
@@ -56,7 +58,7 @@ namespace AutoCADEquipmentPlugin.Logic
                     for (int j = 0; j < count; j++)
                     {
                         var pos = p1 + dir * (j * (blockLength + offset)) + perp;
-                        if (!GeometryUtils.IsPointInside(poly, pos)) continue;
+                        if (!GeometryUtils.IsPointInside(poly, new Point2d(pos.X, pos.Y), tolerance)) continue;
 
                         var br = new BlockReference(pos, brDef.ObjectId)
                         {
@@ -70,7 +72,7 @@ namespace AutoCADEquipmentPlugin.Logic
 
                     // угловой блок
                     var corner = p2 + perp;
-                    if (GeometryUtils.IsPointInside(poly, corner))
+                    if (GeometryUtils.IsPointInside(poly, new Point2d(corner.X, corner.Y), tolerance))
                     {
                         var cb = new BlockReference(corner, brDef.ObjectId)
                         {
