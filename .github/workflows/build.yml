@@ -17,15 +17,11 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    - name: Restore NuGet packages (если используешь NuGet)
-      run: nuget restore Plugin.csproj
-
     - name: Build project
-      run: msbuild Plugin.csproj /p:Configuration=Release
+      run: msbuild Plugin.csproj /p:Configuration=Release /p:OutputPath=bin\PluginOutput\
 
     - name: Upload compiled DLL
       uses: actions/upload-artifact@v4
       with:
         name: AutoCADPlugin
-        path: |
-          bin\Release\*.dll
+        path: bin\PluginOutput\*.dll
