@@ -1,27 +1,33 @@
-<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
-
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net48</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <OutputPath>bin\PluginOutput\</OutputPath>
     <RootNamespace>AutoCADEquipmentPlugin</RootNamespace>
     <AssemblyName>AutoCADEquipmentPlugin</AssemblyName>
-    <Platforms>x64</Platforms>
-    <OutputPath>bin\PluginOutput\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
     <Reference Include="AcCoreMgd">
-      <HintPath>$(AutoCAD_ReferencePath)\AcCoreMgd.dll</HintPath>
+      <HintPath>libs\AcCoreMgd.dll</HintPath>
     </Reference>
     <Reference Include="AcDbMgd">
-      <HintPath>$(AutoCAD_ReferencePath)\AcDbMgd.dll</HintPath>
+      <HintPath>libs\AcDbMgd.dll</HintPath>
     </Reference>
     <Reference Include="AcMgd">
-      <HintPath>$(AutoCAD_ReferencePath)\AcMgd.dll</HintPath>
+      <HintPath>libs\AcMgd.dll</HintPath>
     </Reference>
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Plugin.cs" />
+    <Compile Include="Placer.cs" />
+    <Compile Include="PlaceForm.cs" />
+    <Compile Include="Utils.cs" />
   </ItemGroup>
 
 </Project>
