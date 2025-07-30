@@ -31,8 +31,8 @@
 
   <ItemGroup>
     <Compile Include="Plugin.cs" />
-    <Compile Include="Placer.cs" />
-    <Compile Include="PlaceForm.cs" />
-    <Compile Include="Utils.cs" />
+    <Compile Include="Logic\Placer.cs" />
+    <Compile Include="UI\PlaceForm.cs" />
+    <Compile Include="Geometry\Utils.cs" />
   </ItemGroup>
 </Project>
