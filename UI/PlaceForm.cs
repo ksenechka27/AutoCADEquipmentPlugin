@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
-using Autodesk.AutoCAD.DatabaseServices;
 using AutoCADEquipmentPlugin.Logic;
 
 namespace AutoCADEquipmentPlugin.UI
@@ -18,55 +18,59 @@ namespace AutoCADEquipmentPlugin.UI
 
         private void btnPlace_Click(object sender, EventArgs e)
         {
-            // Получаем имя блока из текстового поля
-            string blockName = txtBlockName.Text.Trim();
-            if (string.IsNullOrEmpty(blockName))
-            {
-                MessageBox.Show("Введите имя блока.");
-                return;
-            }
-
             Document doc = Application.DocumentManager.MdiActiveDocument;
             Editor ed = doc.Editor;
 
-            try
-            {
-                // Выбор полилинии-границы
-                PromptEntityOptions peo = new PromptEntityOptions("\nВыберите границу (полилинию):");
-                peo.SetRejectMessage("\nМожно выбрать только полилинию.");
-                peo.AddAllowedClass(typeof(Polyline), true);
-                PromptEntityResult per = ed.GetEntity(peo);
-                if (per.Status != PromptStatus.OK) return;
+            // Выбор полилинии границы
+            PromptEntityOptions peo = new PromptEntityOptions("\nВыберите полилинию (граница торгового зала): ");
+            peo.SetRejectMessage("Нужно выбрать именно полилинию.");
+            peo.AddAllowedClass(typeof(Polyline), true);
+            PromptEntityResult per = ed.GetEntity(peo);
+            if (per.Status != PromptStatus.OK) return;
 
-                ObjectId polyId = per.ObjectId;
-                Polyline boundary;
-                using (Transaction tr = doc.TransactionManager.StartTransaction())
+            Polyline boundary = null;
+            using (Transaction tr = doc.TransactionManager.StartTransaction())
+            {
+                boundary = tr.GetObject(per.ObjectId, OpenMode.ForRead) as Polyline;
+                if (boundary == null || !boundary.Closed)
                 {
-                    boundary = tr.GetObject(polyId, OpenMode.ForRead) as Polyline;
-                    tr.Commit();
+                    ed.WriteMessage("\nОшибка: выбрана незамкнутая или некорректная полилиния.");
+                    return;
                 }
 
-                // Выбор точки входа
-                PromptPointResult pprEntry = ed.GetPoint("\nУкажите точку входа:");
+                // Выбор входа
+                PromptPointResult pprEntry = ed.GetPoint("\nУкажите точку входа: ");
                 if (pprEntry.Status != PromptStatus.OK) return;
                 Point3d entry = pprEntry.Value;
 
-                // Выбор точки выхода
-                PromptPointResult pprExit = ed.GetPoint("\nУкажите точку выхода:");
+                // Выбор выхода
+                PromptPointResult pprExit = ed.GetPoint("\nУкажите точку выхода: ");
                 if (pprExit.Status != PromptStatus.OK) return;
                 Point3d exit = pprExit.Value;
 
-                // Вызов размещения
-                Placer.PlaceBlocks(new List<string> { blockName }, boundary, entry, exit);
+                // Получение имени блока из текстового поля
+                string blockName = txtBlockName.Text.Trim();
+                if (string.IsNullOrEmpty(blockName))
+                {
+                    MessageBox.Show("Введите имя блока.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                List<string> blocks = new List<string> { blockName };
+
+                // Запуск размещения
+                Placer.PlaceBlocks(blocks, boundary, entry, exit);
+
+                tr.Commit();
             }
-            catch (System.Exception ex)
-            {
-                ed.WriteMessage($"\nОшибка: {ex.Message}");
-            }
-            finally
-            {
-                this.Close();
-            }
+
+            // Закрыть форму после размещения
+            this.Close();
+        }
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            this.Close();
         }
     }
 }
