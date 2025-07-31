@@ -14,7 +14,6 @@ namespace AutoCADEquipmentPlugin
             var doc = Application.DocumentManager.MdiActiveDocument;
             if (doc == null) return;
 
-            // Показываем форму настроек
             Application.ShowModelessDialog(new PlaceForm());
         }
     }
