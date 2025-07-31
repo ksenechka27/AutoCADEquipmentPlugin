@@ -16,7 +16,7 @@ namespace AutoCADEquipmentPlugin
 
             // Показываем форму настроек
             var form = new PlaceForm();
-            Application.ShowModalDialog(form);
+            Application.ShowModelessDialog(new UI.PlaceForm());
         }
     }
 }
