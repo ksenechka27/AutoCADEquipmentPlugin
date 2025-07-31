@@ -1,71 +1,72 @@
+using System;
+using System.Collections.Generic;
+using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
-using System.Collections.Generic;
-using System.Linq;
-using AutoCADEquipmentPlugin.Geometry;
+using AutoCADEquipmentPlugin.Logic;
 
-namespace AutoCADEquipmentPlugin.Logic
+namespace AutoCADEquipmentPlugin.UI
 {
-    public static class Placer
+    public partial class PlaceForm : Form
     {
-        public static void PlaceBlocks(List<string> blockNames, Polyline boundary, Point3d entryPoint, Point3d exitPoint)
+        public PlaceForm()
         {
-            var doc = Application.DocumentManager.MdiActiveDocument;
-            var db = doc.Database;
-
-            using (var tr = db.TransactionManager.StartTransaction())
-            {
-                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-
-                List<Entity> obstacles = GetObstacles(ms, tr);
-
-                double offset = 300; // отступ между блоками, мм
-                Point3d currentPos = entryPoint;
-
-                foreach (var name in blockNames)
-                {
-                    if (!bt.Has(name)) continue;
-                    BlockTableRecord brDef = (BlockTableRecord)tr.GetObject(bt[name], OpenMode.ForRead);
-
-                    using (BlockReference br = new BlockReference(currentPos, brDef.ObjectId))
-                    {
-                        ms.AppendEntity(br);
-                        tr.AddNewlyCreatedDBObject(br, true);
-
-                        if (br.Bounds.HasValue)
-                        {
-                            Point3d center = br.Bounds.Value.Center();
-
-                            if (!GeometryUtils.IsPointInside(boundary, center) || GeometryUtils.IntersectsOther(ms, br, tr))
-                            {
-                                br.Erase();
-                                continue;
-                            }
-
-                            currentPos = new Point3d(currentPos.X + offset, currentPos.Y, currentPos.Z);
-                        }
-                    }
-                }
-
-                tr.Commit();
-            }
+            InitializeComponent();
         }
 
-        private static List<Entity> GetObstacles(BlockTableRecord ms, Transaction tr)
+        private void btnOk_Click(object sender, EventArgs e)
         {
-            List<Entity> obstacles = new List<Entity>();
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
 
-            foreach (ObjectId id in ms)
+            // 1. Запрос замкнутой полилинии
+            PromptEntityOptions peo = new PromptEntityOptions("\nВыберите замкнутую полилинию помещения:");
+            peo.SetRejectMessage("Нужно выбрать полилинию.");
+            peo.AddAllowedClass(typeof(Polyline), true);
+
+            PromptEntityResult per = ed.GetEntity(peo);
+            if (per.Status != PromptStatus.OK) return;
+
+            ObjectId polyId = per.ObjectId;
+            Polyline boundary = null;
+
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
-                Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent is BlockReference || ent is Polyline) continue;
-
-                obstacles.Add(ent);
+                boundary = tr.GetObject(polyId, OpenMode.ForRead) as Polyline;
+                if (boundary == null || !boundary.Closed)
+                {
+                    ed.WriteMessage("\nПолилиния должна быть замкнутой.");
+                    return;
+                }
+                tr.Commit();
             }
 
-            return obstacles;
+            // 2. Запрос точки входа
+            PromptPointResult pprEntry = ed.GetPoint("\nУкажите точку входа:");
+            if (pprEntry.Status != PromptStatus.OK) return;
+            Point3d entry = pprEntry.Value;
+
+            // 3. Запрос точки выхода
+            PromptPointResult pprExit = ed.GetPoint("\nУкажите точку выхода:");
+            if (pprExit.Status != PromptStatus.OK) return;
+            Point3d exit = pprExit.Value;
+
+            // 4. Получение имени блока
+            string blockName = comboBoxBlockName.Text; // Из UI
+            if (string.IsNullOrWhiteSpace(blockName))
+            {
+                MessageBox.Show("Выберите имя блока.");
+                return;
+            }
+
+            // 5. Вызов размещения
+            List<string> blocks = new List<string> { blockName };
+            Placer.PlaceBlocks(blocks, boundary, entry, exit);
+
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
     }
 }
