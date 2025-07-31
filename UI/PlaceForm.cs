@@ -4,76 +4,86 @@ using System.Windows.Forms;
 
 namespace AutoCADEquipmentPlugin.UI
 {
+    public class BlockInfo
+    {
+        public string Name { get; set; }
+        public double Offset { get; set; }
+        public int Count { get; set; }  // -1 означает "до заполнения"
+    }
+
     public class PlaceForm : Form
     {
-        private DataGridView blockGrid;
-        private NumericUpDown offsetUpDown;
+        private ListView blockListView;
+        private Button addButton, removeButton, placeButton;
         private CheckBox clearOldCheckBox;
-        private Button placeButton;
 
         public PlaceForm()
         {
             Text = "Настройки размещения оборудования";
-            Width = 450; Height = 300;
+            Width = 500;
+            Height = 400;
 
-            Controls.Add(new Label { Text = "Блоки для размещения:", Top = 10, Left = 10, Width = 200 });
-
-            blockGrid = new DataGridView
+            blockListView = new ListView
             {
-                Top = 30,
+                Top = 10,
                 Left = 10,
-                Width = 410,
-                Height = 150,
-                AllowUserToAddRows = true,
-                AllowUserToDeleteRows = true,
-                ColumnCount = 2,
-                RowHeadersVisible = false
+                Width = 460,
+                Height = 250,
+                View = View.Details,
+                FullRowSelect = true
             };
-            blockGrid.Columns[0].Name = "Имя блока";
-            blockGrid.Columns[1].Name = "Количество (0 = максимум)";
-            Controls.Add(blockGrid);
+            blockListView.Columns.Add("Имя блока", 180);
+            blockListView.Columns.Add("Отступ (мм)", 100);
+            blockListView.Columns.Add("Кол-во", 80);
+            Controls.Add(blockListView);
 
-            Controls.Add(new Label { Text = "Отступ (мм):", Top = 190, Left = 10, Width = 100 });
-            offsetUpDown = new NumericUpDown
-            {
-                Top = 190,
-                Left = 120,
-                Width = 100,
-                Minimum = 0,
-                Maximum = 10000,
-                Value = 500
-            };
-            Controls.Add(offsetUpDown);
+            addButton = new Button { Text = "Добавить", Top = 270, Left = 10, Width = 100 };
+            removeButton = new Button { Text = "Удалить", Top = 270, Left = 120, Width = 100 };
+            placeButton = new Button { Text = "Разместить", Top = 320, Left = 360, Width = 100 };
+            clearOldCheckBox = new CheckBox { Text = "Очистить старые", Top = 320, Left = 10, Width = 200 };
 
-            clearOldCheckBox = new CheckBox { Text = "Очистить старые", Top = 220, Left = 120, Width = 150 };
+            Controls.Add(addButton);
+            Controls.Add(removeButton);
+            Controls.Add(placeButton);
             Controls.Add(clearOldCheckBox);
 
-            placeButton = new Button { Text = "Разместить", Top = 240, Left = 120, Width = 100 };
+            addButton.Click += (s, e) =>
+            {
+                var dlg = new AddBlockDialog();
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    var item = new ListViewItem(new[] {
+                        dlg.BlockName,
+                        dlg.Offset.ToString(),
+                        dlg.Count == -1 ? "∞" : dlg.Count.ToString()
+                    });
+                    blockListView.Items.Add(item);
+                }
+            };
+
+            removeButton.Click += (s, e) =>
+            {
+                foreach (ListViewItem item in blockListView.SelectedItems)
+                    blockListView.Items.Remove(item);
+            };
+
             placeButton.Click += (s, e) =>
             {
-                var blockList = new List<(string name, int count)>();
-
-                foreach (DataGridViewRow row in blockGrid.Rows)
+                var blocks = new List<BlockInfo>();
+                foreach (ListViewItem item in blockListView.Items)
                 {
-                    if (row.IsNewRow) continue;
-
-                    string blockName = row.Cells[0]?.Value?.ToString();
-                    if (string.IsNullOrWhiteSpace(blockName)) continue;
-
-                    int count = 0;
-                    if (row.Cells[1]?.Value != null)
-                        int.TryParse(row.Cells[1].Value.ToString(), out count);
-
-                    blockList.Add((blockName, count));
+                    string name = item.SubItems[0].Text;
+                    double offset = double.Parse(item.SubItems[1].Text) / 1000.0;
+                    int count = item.SubItems[2].Text == "∞" ? -1 : int.Parse(item.SubItems[2].Text);
+                    blocks.Add(new BlockInfo { Name = name, Offset = offset, Count = count });
                 }
 
-                double offset = (double)offsetUpDown.Value / 1000.0;
                 bool clearOld = clearOldCheckBox.Checked;
-
                 Close();
-                Logic.Placer.Place(blockList, offset, clearOld);
+
+                // Передаём в Placer
+                Logic.Placer.Place(blocks, clearOld);
             };
-            Controls.Add(placeButton);
         }
     }
 }
