@@ -11,28 +11,35 @@ namespace AutoCADEquipmentPlugin.Logic
     {
         public static void PlaceBlocks(List<string> blockNames, Polyline boundary, Point3d entry, Point3d exit)
         {
-            var doc = Application.DocumentManager.MdiActiveDocument;
-            var db = doc.Database;
-            var ed = doc.Editor;
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
 
-            using (var tr = db.TransactionManager.StartTransaction())
+            using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                var ms = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
+                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
 
-                List<Entity> obstacles = CollectObstacles(ms, tr);
-                List<Point3d> wallPoints = ExtractWallPoints(boundary);
+                List<Entity> existingBlocks = new List<Entity>();
+                List<Entity> obstacles = GetObstacles(tr, btr);
+                List<Point3d> wallPoints = GetWallPoints(boundary);
 
+                foreach (ObjectId id in btr)
+                {
+                    Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                    if (ent is BlockReference br)
+                        existingBlocks.Add(br);
+                }
+
+                double offset = 500.0;
                 foreach (string blockName in blockNames)
                 {
-                    if (!bt.Has(blockName))
-                        continue;
-
-                    var blockDef = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
+                    if (!bt.Has(blockName)) continue;
+                    BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
 
                     foreach (Point3d pt in wallPoints)
                     {
-                        if (TryPlace(pt, blockDef, ms, tr, obstacles))
+                        if (TryPlaceBlock(blockDef, pt, offset, existingBlocks, obstacles, btr, tr))
                         {
                             ed.WriteMessage($"\nБлок '{blockName}' размещён.");
                             break;
@@ -44,39 +51,41 @@ namespace AutoCADEquipmentPlugin.Logic
             }
         }
 
-        private static List<Entity> CollectObstacles(BlockTableRecord ms, Transaction tr)
+        private static List<Point3d> GetWallPoints(Polyline boundary)
         {
-            var list = new List<Entity>();
-            foreach (ObjectId id in ms)
-            {
-                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent != null && !(ent is BlockReference) && !(ent is Polyline))
-                    list.Add(ent);
-            }
-            return list;
-        }
-
-        private static List<Point3d> ExtractWallPoints(Polyline boundary)
-        {
-            var pts = new List<Point3d>();
+            List<Point3d> points = new List<Point3d>();
             for (int i = 0; i < boundary.NumberOfVertices; i++)
-            {
-                pts.Add(boundary.GetPoint3dAt(i));
-            }
-            return pts;
+                points.Add(boundary.GetPoint3dAt(i));
+            return points;
         }
 
-        private static bool TryPlace(Point3d pos, BlockTableRecord def, BlockTableRecord ms,
-                                     Transaction tr, List<Entity> obstacles)
+        private static List<Entity> GetObstacles(Transaction tr, BlockTableRecord btr)
         {
-            var br = new BlockReference(pos, def.ObjectId);
-            if (!GeometryUtils.IntersectsOther(ms, br, tr))
+            List<Entity> result = new List<Entity>();
+            foreach (ObjectId id in btr)
             {
-                ms.AppendEntity(br);
-                tr.AddNewlyCreatedDBObject(br, true);
-                return true;
+                Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent != null && !(ent is Polyline) && !(ent is BlockReference))
+                {
+                    result.Add(ent);
+                }
             }
-            br.Dispose();
+            return result;
+        }
+
+        private static bool TryPlaceBlock(BlockTableRecord blockDef, Point3d position, double offset, List<Entity> existingBlocks, List<Entity> obstacles, BlockTableRecord btr, Transaction tr)
+        {
+            Point3d basePoint = new Point3d(position.X + offset, position.Y + offset, 0);
+            using (BlockReference br = new BlockReference(basePoint, blockDef.ObjectId))
+            {
+                if (!Utils.IntersectsOther(br, existingBlocks) && !Utils.IntersectsOther(br, obstacles))
+                {
+                    btr.AppendEntity(br);
+                    tr.AddNewlyCreatedDBObject(br, true);
+                    existingBlocks.Add(br);
+                    return true;
+                }
+            }
             return false;
         }
     }
