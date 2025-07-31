@@ -1,3 +1,4 @@
+// Placer.cs — с поддержкой обхода внутренних препятствий и проверки пересечений
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -14,117 +15,133 @@ namespace AutoCADEquipmentPlugin.Logic
         public static void Place(string blockName, double offset, bool clearOld)
         {
             Document doc = Application.DocumentManager.MdiActiveDocument;
-            Database db = doc.Database;
             Editor ed = doc.Editor;
-
-            PromptEntityOptions polyOpts = new PromptEntityOptions("Выберите полилинию для размещения: ");
-            polyOpts.SetRejectMessage("Только полилинии!");
-            polyOpts.AddAllowedClass(typeof(Polyline), false);
-
-            PromptEntityResult polyRes = ed.GetEntity(polyOpts);
-            if (polyRes.Status != PromptStatus.OK) return;
-
-            PromptPointResult entryRes = ed.GetPoint("Укажите точку входа: ");
-            if (entryRes.Status != PromptStatus.OK) return;
-            Point3d entryPoint = entryRes.Value;
-
-            PromptPointResult exitRes = ed.GetPoint("Укажите точку выхода: ");
-            if (exitRes.Status != PromptStatus.OK) return;
-            Point3d exitPoint = exitRes.Value;
+            Database db = doc.Database;
 
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                if (!bt.Has(blockName))
-                {
-                    ed.WriteMessage("\nБлок не найден: " + blockName);
-                    return;
-                }
+                // Выбор полилинии помещения
+                PromptEntityOptions peo = new PromptEntityOptions("Выберите полилинию помещения: ");
+                peo.SetRejectMessage("Нужна полилиния.");
+                peo.AddAllowedClass(typeof(Polyline), true);
+                PromptEntityResult per = ed.GetEntity(peo);
+                if (per.Status != PromptStatus.OK) return;
+                Polyline boundary = tr.GetObject(per.ObjectId, OpenMode.ForRead) as Polyline;
 
-                BlockTableRecord modelSpace = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                Polyline boundary = tr.GetObject(polyRes.ObjectId, OpenMode.ForRead) as Polyline;
+                // Точка входа
+                PromptPointResult pprStart = ed.GetPoint("Укажите точку входа: ");
+                if (pprStart.Status != PromptStatus.OK) return;
+                Point3d entry = pprStart.Value;
+
+                // Точка выхода
+                PromptPointResult pprEnd = ed.GetPoint("Укажите точку выхода: ");
+                if (pprEnd.Status != PromptStatus.OK) return;
+                Point3d exit = pprEnd.Value;
+
+                // Поиск препятствий
+                List<Extents3d> obstacles = CollectObstacles(tr, db, boundary.ObjectId);
 
                 // Очистка старых блоков
                 if (clearOld)
-                {
-                    foreach (ObjectId id in modelSpace)
-                    {
-                        Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                        if (ent is BlockReference br && br.Name == blockName)
-                        {
-                            br.UpgradeOpen();
-                            br.Erase();
-                        }
-                    }
-                }
+                    DeleteOldBlocks(tr, db, blockName);
 
-                // Сбор препятствий
-                List<Extents3d> obstacles = new List<Extents3d>();
-                foreach (ObjectId id in modelSpace)
-                {
-                    Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                    if (ent is BlockReference br && br.Name == blockName) continue;
-                    if (ent.Bounds.HasValue)
-                    {
-                        obstacles.Add(ent.Bounds.Value);
-                    }
-                }
+                // Размещение вдоль стен
+                PlaceBlockAlongPolyline(tr, db, blockName, boundary, entry, offset, obstacles);
 
-                // Расставляем блоки вдоль полилинии
-                PlaceBlocksAlongPolyline(modelSpace, tr, bt[blockName], boundary, offset, entryPoint, exitPoint, obstacles);
                 tr.Commit();
             }
         }
 
-        private static void PlaceBlocksAlongPolyline(BlockTableRecord space, Transaction tr, ObjectId blockId, Polyline pline, double offset, Point3d entry, Point3d exit, List<Extents3d> obstacles)
+        private static List<Extents3d> CollectObstacles(Transaction tr, Database db, ObjectId boundaryId)
         {
-            double totalLength = pline.Length;
-            double placedLength = 0;
-            double step = offset;
-            int segmentCount = pline.NumberOfVertices - 1;
+            List<Extents3d> result = new();
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
 
-            for (int i = 0; i < segmentCount; i++)
+            foreach (ObjectId id in ms)
             {
-                LineSegment3d segment = pline.GetLineSegmentAt(i);
-                Vector3d direction = segment.Direction.GetNormal();
-                double length = segment.Length;
-                Point3d current = segment.StartPoint;
-
-                while ((current - segment.EndPoint).Length > offset)
+                if (id == boundaryId) continue;
+                Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent == null || ent is BlockReference br && br.Name.StartsWith("EQP_")) continue;
+                try
                 {
-                    Point3d insertionPoint = current + (direction * offset / 2);
-                    if (CanPlaceHere(insertionPoint, blockId, tr, obstacles))
-                    {
-                        BlockReference br = new BlockReference(insertionPoint, blockId);
-                        br.Rotation = Math.Atan2(direction.Y, direction.X);
-                        space.AppendEntity(br);
-                        tr.AddNewlyCreatedDBObject(br, true);
-                    }
-                    current += direction * offset;
+                    var ext = ent.GeometricExtents;
+                    result.Add(ext);
                 }
+                catch { }
+            }
+            return result;
+        }
+
+        private static void DeleteOldBlocks(Transaction tr, Database db, string blockName)
+        {
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            foreach (ObjectId id in ms)
+            {
+                if (id.ObjectClass.Name != "AcDbBlockReference") continue;
+                BlockReference br = tr.GetObject(id, OpenMode.ForWrite) as BlockReference;
+                if (br != null && br.Name == blockName)
+                    br.Erase();
             }
         }
 
-        private static bool CanPlaceHere(Point3d point, ObjectId blockId, Transaction tr, List<Extents3d> obstacles)
+        private static void PlaceBlockAlongPolyline(Transaction tr, Database db, string blockName, Polyline poly, Point3d entry, double offset, List<Extents3d> obstacles)
         {
-            BlockTableRecord blockDef = tr.GetObject(blockId, OpenMode.ForRead) as BlockTableRecord;
-            Extents3d blockExtents = blockDef.Bounds ?? new Extents3d(point, point);
-            Point3d min = point + (blockExtents.MinPoint - blockDef.Origin.GetPoint3d());
-            Point3d max = point + (blockExtents.MaxPoint - blockDef.Origin.GetPoint3d());
-            Extents3d placementExtents = new Extents3d(min, max);
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
+            BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
 
-            foreach (var obs in obstacles)
+            double totalLen = poly.Length;
+            double current = 0;
+
+            while (current < totalLen)
             {
-                if (Intersects(placementExtents, obs))
-                    return false;
+                Point3d pos = poly.GetPointAtDist(current);
+                Vector3d normal = poly.GetFirstDerivative(pos).GetNormal();
+                double angle = normal.AngleOnPlane(Vector3d.ZAxis);
+
+                // Попытка размещения
+                if (TryPlaceBlock(pos, angle, db, ms, blockName, tr, obstacles))
+                    current += offset;
+                else
+                    current += offset / 2.0; // шаг уменьшаем при препятствиях
             }
+        }
+
+        private static bool TryPlaceBlock(Point3d pos, double angle, Database db, BlockTableRecord ms, string blockName, Transaction tr, List<Extents3d> obstacles)
+        {
+            BlockReference br = new BlockReference(pos, db.BlockTableId[blockName]);
+            br.Rotation = angle;
+            br.ScaleFactors = new Scale3d(1);
+            br.Layer = "0";
+
+            // Проверка пересечений
+            Extents3d? ext = TryGetExtents(br);
+            if (ext.HasValue)
+            {
+                foreach (var obs in obstacles)
+                {
+                    if (IsIntersecting(ext.Value, obs))
+                        return false;
+                }
+            }
+
+            ms.AppendEntity(br);
+            tr.AddNewlyCreatedDBObject(br, true);
             return true;
         }
 
-        private static bool Intersects(Extents3d a, Extents3d b)
+        private static Extents3d? TryGetExtents(Entity ent)
         {
-            return !(a.MaxPoint.X < b.MinPoint.X || a.MinPoint.X > b.MaxPoint.X ||
-                     a.MaxPoint.Y < b.MinPoint.Y || a.MinPoint.Y > b.MaxPoint.Y);
+            try { return ent.GeometricExtents; } catch { return null; }
+        }
+
+        private static bool IsIntersecting(Extents3d a, Extents3d b)
+        {
+            return a.MinPoint.X < b.MaxPoint.X && a.MaxPoint.X > b.MinPoint.X &&
+                   a.MinPoint.Y < b.MaxPoint.Y && a.MaxPoint.Y > b.MinPoint.Y;
         }
     }
 }
