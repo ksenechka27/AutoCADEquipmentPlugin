@@ -2,46 +2,71 @@ using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
-using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.DatabaseServices;
 using AutoCADEquipmentPlugin.Logic;
 
 namespace AutoCADEquipmentPlugin.UI
 {
     public partial class PlaceForm : Form
     {
-        public PlaceForm() => InitializeComponent();
-
-        private void btnOk_Click(object sender, EventArgs e)
+        public PlaceForm()
         {
-            var doc = Application.DocumentManager.MdiActiveDocument;
-            var ed = doc.Editor;
+            InitializeComponent();
+        }
 
-            var peo = new PromptEntityOptions("\nВыберите границу помещения (закрытая полилиния):");
-            peo.SetRejectMessage("Нужно выбрать замкнутую полилинию.");
-            peo.AddAllowedClass(typeof(Polyline), false);
-            var per = ed.GetEntity(peo);
-            if (per.Status != PromptStatus.OK) return;
-
-            Polyline boundary;
-            using (var tr = doc.Database.TransactionManager.StartTransaction())
+        private void btnPlace_Click(object sender, EventArgs e)
+        {
+            // Получаем имя блока из текстового поля
+            string blockName = txtBlockName.Text.Trim();
+            if (string.IsNullOrEmpty(blockName))
             {
-                boundary = (Polyline)tr.GetObject(per.ObjectId, OpenMode.ForRead);
-                if (!boundary.Closed) { ed.WriteMessage("\nПолилиния должна быть замкнутой."); return; }
-                tr.Commit();
+                MessageBox.Show("Введите имя блока.");
+                return;
             }
 
-            var ppr1 = ed.GetPoint("\nУкажите точку входа:"); if (ppr1.Status != PromptStatus.OK) return;
-            var ppr2 = ed.GetPoint("\nУкажите точку выхода:"); if (ppr2.Status != PromptStatus.OK) return;
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
 
-            string blockName = comboBoxBlockName.Text;
-            if (string.IsNullOrWhiteSpace(blockName)) { MessageBox.Show("Выберите блок."); return; }
+            try
+            {
+                // Выбор полилинии-границы
+                PromptEntityOptions peo = new PromptEntityOptions("\nВыберите границу (полилинию):");
+                peo.SetRejectMessage("\nМожно выбрать только полилинию.");
+                peo.AddAllowedClass(typeof(Polyline), true);
+                PromptEntityResult per = ed.GetEntity(peo);
+                if (per.Status != PromptStatus.OK) return;
 
-            PlaceBlocks(new List<string> { blockName }, boundary, ppr1.Value, ppr2.Value);
+                ObjectId polyId = per.ObjectId;
+                Polyline boundary;
+                using (Transaction tr = doc.TransactionManager.StartTransaction())
+                {
+                    boundary = tr.GetObject(polyId, OpenMode.ForRead) as Polyline;
+                    tr.Commit();
+                }
 
-            this.DialogResult = DialogResult.OK;
-            this.Close();
+                // Выбор точки входа
+                PromptPointResult pprEntry = ed.GetPoint("\nУкажите точку входа:");
+                if (pprEntry.Status != PromptStatus.OK) return;
+                Point3d entry = pprEntry.Value;
+
+                // Выбор точки выхода
+                PromptPointResult pprExit = ed.GetPoint("\nУкажите точку выхода:");
+                if (pprExit.Status != PromptStatus.OK) return;
+                Point3d exit = pprExit.Value;
+
+                // Вызов размещения
+                Placer.PlaceBlocks(new List<string> { blockName }, boundary, entry, exit);
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage($"\nОшибка: {ex.Message}");
+            }
+            finally
+            {
+                this.Close();
+            }
         }
     }
 }
