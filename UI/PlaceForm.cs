@@ -14,175 +14,107 @@ namespace AutoCADEquipmentPlugin.Logic
         public static void Place(string blockName, double offset, bool clearOld)
         {
             Document doc = Application.DocumentManager.MdiActiveDocument;
-            Database db = doc.Database;
             Editor ed = doc.Editor;
+            Database db = doc.Database;
 
-            try
+            using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                // Выбор полилинии — это будет область расстановки
-                PromptEntityOptions peo = new PromptEntityOptions("\nВыберите полилинию области расстановки оборудования: ");
-                peo.SetRejectMessage("\nНужна именно полилиния.");
-                peo.AddAllowedClass(typeof(Polyline), false);
+                // Очистка старых блоков
+                if (clearOld)
+                {
+                    Utils.ClearPreviousBlocks(blockName, tr);
+                }
+
+                // Выбор полилинии области расстановки
+                PromptEntityOptions peo = new PromptEntityOptions("\nВыберите внутреннюю полилинию зоны расстановки:");
+                peo.SetRejectMessage("Только полилиния.");
+                peo.AddAllowedClass(typeof(Polyline), true);
                 PromptEntityResult per = ed.GetEntity(peo);
                 if (per.Status != PromptStatus.OK) return;
-
-                ObjectId polyId = per.ObjectId;
-
-                // Выбор точки начала расстановки (вход)
-                PromptPointResult pStart = ed.GetPoint("\nУкажите точку начала расстановки (вход): ");
-                if (pStart.Status != PromptStatus.OK) return;
-
-                // Выбор точки конца расстановки (выход)
-                PromptPointResult pEnd = ed.GetPoint("\nУкажите точку конца расстановки (выход): ");
-                if (pEnd.Status != PromptStatus.OK) return;
-
-                using (Transaction tr = db.TransactionManager.StartTransaction())
+                Polyline zonePolyline = tr.GetObject(per.ObjectId, OpenMode.ForRead) as Polyline;
+                if (!zonePolyline.Closed)
                 {
-                    Polyline boundary = tr.GetObject(polyId, OpenMode.ForRead) as Polyline;
-                    if (boundary == null) return;
+                    ed.WriteMessage("\nПолилиния должна быть замкнута.");
+                    return;
+                }
 
-                    // Получение всех вершин полилинии как маршрута вдоль стен
-                    List<Point2d> wallPath = new List<Point2d>();
-                    for (int i = 0; i < boundary.NumberOfVertices; i++)
-                        wallPath.Add(boundary.GetPoint2dAt(i));
+                // Ввод начальной и конечной точки пользователем
+                PromptPointResult startRes = ed.GetPoint("\nУкажите начальную точку размещения:");
+                if (startRes.Status != PromptStatus.OK) return;
+                Point3d startPoint = startRes.Value;
 
-                    BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
-                    if (!bt.Has(blockName))
+                PromptPointResult endRes = ed.GetPoint("\nУкажите конечную точку размещения:");
+                if (endRes.Status != PromptStatus.OK) return;
+                Point3d endPoint = endRes.Value;
+
+                // Получение определения блока
+                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                if (!bt.Has(blockName))
+                {
+                    ed.WriteMessage("\nБлок с именем " + blockName + " не найден.");
+                    return;
+                }
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
+
+                // Границы блока
+                Extents3d? blockExt = Utils.GetBlockExtents(btr);
+                if (blockExt == null)
+                {
+                    ed.WriteMessage("\nНевозможно определить габариты блока.");
+                    return;
+                }
+
+                Vector3d totalDirection = endPoint - startPoint;
+
+                List<SegmentInfo> segments = Utils.ExtractSegments(zonePolyline);
+                Point3d currentPos = startPoint;
+                Vector3d moveDir = totalDirection.GetNormal();
+
+                foreach (var seg in segments)
+                {
+                    Vector3d segDir = (seg.End - seg.Start).GetNormal();
+                    double segmentLength = seg.Start.DistanceTo(seg.End);
+                    Point3d blockPos = seg.Start;
+
+                    // Ориентируем блок вдоль сегмента
+                    double angle = segDir.AngleOnPlane(new Plane(Point3d.Origin, Vector3d.ZAxis));
+                    double step = blockExt.Value.MaxPoint.X - blockExt.Value.MinPoint.X + offset;
+
+                    while (blockPos.DistanceTo(seg.End) >= step)
                     {
-                        ed.WriteMessage($"\nБлок с именем \"{blockName}\" не найден.");
-                        return;
-                    }
+                        // Проверка попадания внутрь зоны
+                        if (!Utils.IsPointInside(zonePolyline, blockPos))
+                        {
+                            blockPos = blockPos + segDir.MultiplyBy(step);
+                            continue;
+                        }
 
-                    if (clearOld)
-                        ClearExistingBlocks(tr, db, blockName);
-
-                    BlockTableRecord modelSpace = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
-                    BlockTableRecord blockDef = tr.GetObject(bt[blockName], OpenMode.ForRead) as BlockTableRecord;
-
-                    double blockLength = GetBlockBoundingLength(blockDef);
-                    double blockWidth = GetBlockBoundingWidth(blockDef);
-
-                    // Проходим по отрезкам маршрута вдоль границ
-                    Point2d currentPos = FindNearestPointOnPath(wallPath, pStart.Value.Convert2d());
-
-                    while (true)
-                    {
-                        Vector2d direction = GetNextDirection(wallPath, currentPos, pEnd.Value.Convert2d());
-                        if (direction.IsZeroLength()) break;
-
-                        // Позиция для установки блока
-                        Point3d insertPt = new Point3d(currentPos.X, currentPos.Y, 0);
-
-                        // Проверка, не выйдет ли блок за границы
-                        if (!IsBlockInsideBoundary(boundary, insertPt, direction, blockLength, blockWidth)) break;
+                        // Проверка на пересечения с объектами
+                        if (Utils.HasIntersections(blockPos, angle, btr, tr))
+                        {
+                            blockPos = blockPos + segDir.MultiplyBy(step);
+                            continue;
+                        }
 
                         // Вставка блока
-                        BlockReference br = new BlockReference(insertPt, blockDef.ObjectId);
-                        br.Rotation = direction.Angle;
-                        br.ScaleFactors = new Scale3d(1);
+                        BlockReference br = new BlockReference(blockPos, btr.ObjectId);
+                        br.Rotation = angle;
+                        BlockTableRecord modelSpace = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                        modelSpace.AppendEntity(br);
+                        tr.AddNewlyCreatedDBObject(br, true);
 
-                        if (!IsIntersecting(tr, db, br))
-                        {
-                            modelSpace.AppendEntity(br);
-                            tr.AddNewlyCreatedDBObject(br, true);
-                        }
-                        else
-                        {
-                            br.Dispose();
-                            break; // пересечение — прерываем
-                        }
-
-                        // Продвигаемся по направлению на длину блока + отступ
-                        currentPos = new Point2d(
-                            currentPos.X + direction.X * (blockLength + offset),
-                            currentPos.Y + direction.Y * (blockLength + offset)
-                        );
+                        blockPos = blockPos + segDir.MultiplyBy(step);
                     }
-
-                    tr.Commit();
                 }
-            }
-            catch (System.Exception ex)
-            {
-                ed.WriteMessage("\nОшибка: " + ex.Message);
+
+                tr.Commit();
             }
         }
 
-        // Удаление старых блоков
-        private static void ClearExistingBlocks(Transaction tr, Database db, string blockName)
+        private struct SegmentInfo
         {
-            BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
-            BlockTableRecord modelSpace = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
-
-            foreach (ObjectId entId in modelSpace)
-            {
-                Entity ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
-                if (ent is BlockReference br && br.Name == blockName)
-                {
-                    br.UpgradeOpen();
-                    br.Erase();
-                }
-            }
+            public Point3d Start;
+            public Point3d End;
         }
-
-        private static double GetBlockBoundingLength(BlockTableRecord blockDef)
-        {
-            Extents3d? ext = blockDef.Bounds;
-            return ext.HasValue ? ext.Value.MaxPoint.X - ext.Value.MinPoint.X : 1.0;
-        }
-
-        private static double GetBlockBoundingWidth(BlockTableRecord blockDef)
-        {
-            Extents3d? ext = blockDef.Bounds;
-            return ext.HasValue ? ext.Value.MaxPoint.Y - ext.Value.MinPoint.Y : 1.0;
-        }
-
-        private static bool IsBlockInsideBoundary(Polyline boundary, Point3d pt, Vector2d dir, double len, double wid)
-        {
-            Point3d[] corners = new Point3d[4];
-            Vector3d right = dir.GetPerpendicularVector().GetNormal().ToVector3d() * wid;
-            Vector3d forward = dir.ToVector3d().GetNormal() * len;
-
-            corners[0] = pt;
-            corners[1] = pt + forward;
-            corners[2] = pt + forward + right;
-            corners[3] = pt + right;
-
-            return corners.All(c => boundary.IsPointInside(c.Convert2d(), Tolerance.Global));
-        }
-
-        private static Vector2d GetNextDirection(List<Point2d> path, Point2d current, Point2d end)
-        {
-            foreach (var pt in path)
-            {
-                if (pt.DistanceTo(current) < 1e-4) continue;
-                Vector2d dir = pt - current;
-                if (!dir.IsZeroLength()) return dir.GetNormal();
-            }
-            return new Vector2d(0, 0);
-        }
-
-        private static Point2d FindNearestPointOnPath(List<Point2d> path, Point2d refPoint)
-        {
-            return path.OrderBy(p => p.GetDistanceTo(refPoint)).First();
-        }
-
-        private static bool IsIntersecting(Transaction tr, Database db, BlockReference br)
-        {
-            // Можно сделать точную проверку пересечений здесь
-            return false;
-        }
-    }
-
-    static class Extensions
-    {
-        public static Point2d Convert2d(this Point3d pt) => new Point2d(pt.X, pt.Y);
-
-        public static bool IsPointInside(this Polyline pl, Point2d pt, Tolerance tol)
-        {
-            return pl.IsInside(pt, tol.EqualPoint, false);
-        }
-
-        public static Vector3d ToVector3d(this Vector2d v) => new Vector3d(v.X, v.Y, 0);
     }
 }
