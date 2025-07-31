@@ -1,16 +1,19 @@
-using System;
 using System.Collections.Generic;
-using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Runtime;
 using AutoCADEquipmentPlugin.Geometry;
 
 namespace AutoCADEquipmentPlugin.Logic
 {
     public static class Placer
     {
-        public static void PlaceEquipmentAlongWalls(Polyline roomPolyline, Point3d entry, Point3d exit, List<(string blockName, int count, double offset)> blocksToPlace)
+        /// <summary>
+        /// Основной метод размещения блоков по стенам внутри замкнутой области.
+        /// </summary>
+        public static void PlaceBlocks(ObjectId polylineId, string blockName, double offset)
         {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
@@ -18,124 +21,91 @@ namespace AutoCADEquipmentPlugin.Logic
 
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+                BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
 
-                List<Entity> obstacles = GetObstacles(ms, tr);
-
-                foreach (var (blockName, count, offset) in blocksToPlace)
+                Polyline boundary = tr.GetObject(polylineId, OpenMode.ForRead) as Polyline;
+                if (boundary == null || !boundary.Closed)
                 {
-                    if (!bt.Has(blockName))
-                    {
-                        ed.WriteMessage($"\nБлок {blockName} не найден.");
-                        continue;
-                    }
-
-                    BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
-                    int placedCount = 0;
-
-                    foreach (Segment segment in GetSegments(roomPolyline))
-                    {
-                        if (placedCount >= count)
-                            break;
-
-                        Point3d currentPoint = segment.StartPoint;
-                        Vector3d direction = (segment.EndPoint - segment.StartPoint).GetNormal();
-
-                        while (placedCount < count)
-                        {
-                            Matrix3d transform = Matrix3d.Displacement(currentPoint - Point3d.Origin);
-                            BlockReference br = new BlockReference(Point3d.Origin, blockDef.ObjectId);
-                            br.TransformBy(transform);
-
-                            if (GeometryUtils.IsPointInside(roomPolyline, currentPoint) &&
-                                !GeometryUtils.IntersectsOther(ms, br, tr) &&
-                                !IntersectsObstacles(br, obstacles))
-                            {
-                                ms.AppendEntity(br);
-                                tr.AddNewlyCreatedDBObject(br, true);
-                                placedCount++;
-                                currentPoint += direction.MultiplyBy(offset);
-                            }
-                            else
-                            {
-                                // сдвинемся дальше по сегменту на offset
-                                currentPoint += direction.MultiplyBy(offset);
-                            }
-
-                            if ((currentPoint - segment.EndPoint).Length < offset)
-                                break;
-                        }
-                    }
+                    ed.WriteMessage("\nОшибка: полилиния не замкнута или не существует.");
+                    return;
                 }
 
+                List<Entity> obstacles = GetObstacles(ms, boundary, tr);
+
+                Place(blockName, boundary, offset, ms, tr, obstacles);
                 tr.Commit();
             }
         }
 
-        private static bool IntersectsObstacles(BlockReference br, List<Entity> obstacles)
+        /// <summary>
+        /// Метод размещения блоков вдоль стен с учётом препятствий.
+        /// </summary>
+        private static void Place(string blockName, Polyline boundary, double offset, BlockTableRecord ms, Transaction tr, List<Entity> obstacles)
         {
-            if (!br.Bounds.HasValue) return false;
+            BlockTableRecord blockDef = tr.GetObject(ms.Database.BlockTableId, OpenMode.ForRead) as BlockTableRecord;
 
-            Extents3d brBounds = br.Bounds.Value;
+            if (!blockDef.Has(blockName)) return;
+            ObjectId blockId = blockDef[blockName];
 
-            foreach (var obstacle in obstacles)
+            for (int i = 0; i < boundary.NumberOfVertices - 1; i++)
             {
-                if (!obstacle.Bounds.HasValue) continue;
+                Point3d start = boundary.GetPoint3dAt(i);
+                Point3d end = boundary.GetPoint3dAt((i + 1) % boundary.NumberOfVertices);
 
-                Extents3d obsBounds = obstacle.Bounds.Value;
+                Vector3d direction = end - start;
+                double length = direction.Length;
+                Vector3d unit = direction.GetNormal();
 
-                bool intersects =
-                    brBounds.MinPoint.X <= obsBounds.MaxPoint.X &&
-                    brBounds.MaxPoint.X >= obsBounds.MinPoint.X &&
-                    brBounds.MinPoint.Y <= obsBounds.MaxPoint.Y &&
-                    brBounds.MaxPoint.Y >= obsBounds.MinPoint.Y;
+                double step = 2.0; // фиксированный шаг (можно заменить на размер блока)
+                for (double d = offset; d < length - offset; d += step)
+                {
+                    Point3d pos = start + unit.MultiplyBy(d);
+                    if (!GeometryUtils.IsPointInside(boundary, pos)) continue;
 
-                if (intersects)
-                    return true;
+                    BlockReference br = new BlockReference(pos, blockId);
+                    ms.AppendEntity(br);
+                    tr.AddNewlyCreatedDBObject(br, true);
+
+                    if (GeometryUtils.IntersectsOther(ms, br, tr))
+                    {
+                        br.Erase();
+                        continue;
+                    }
+                }
             }
-
-            return false;
         }
 
-        private static List<Entity> GetObstacles(BlockTableRecord ms, Transaction tr)
+        /// <summary>
+        /// Получение препятствий внутри области (всё кроме оборудования).
+        /// </summary>
+        private static List<Entity> GetObstacles(BlockTableRecord ms, Polyline boundary, Transaction tr)
         {
-            List<Entity> obstacles = new List<Entity>();
+            var result = new List<Entity>();
 
             foreach (ObjectId id in ms)
             {
                 Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent == null) continue;
+                if (ent == null || ent is BlockReference) continue;
 
-                if (ent is BlockReference || ent is Polyline || ent is Solid || ent is Hatch)
+                if (ent.Bounds.HasValue && GeometryUtils.IsPointInside(boundary, ent.Bounds.Value.Center()))
                 {
-                    if (!ent.Bounds.HasValue) continue;
-                    obstacles.Add(ent);
+                    result.Add(ent);
                 }
             }
 
-            return obstacles;
+            return result;
         }
+    }
 
-        private struct Segment
+    public static class Extents3dExtensions
+    {
+        public static Point3d Center(this Extents3d ext)
         {
-            public Point3d StartPoint;
-            public Point3d EndPoint;
-        }
-
-        private static List<Segment> GetSegments(Polyline poly)
-        {
-            List<Segment> segments = new List<Segment>();
-
-            int count = poly.NumberOfVertices;
-            for (int i = 0; i < count; i++)
-            {
-                Point3d start = poly.GetPoint3dAt(i);
-                Point3d end = poly.GetPoint3dAt((i + 1) % count);
-                segments.Add(new Segment { StartPoint = start, EndPoint = end });
-            }
-
-            return segments;
+            return new Point3d(
+                (ext.MinPoint.X + ext.MaxPoint.X) / 2,
+                (ext.MinPoint.Y + ext.MaxPoint.Y) / 2,
+                (ext.MinPoint.Z + ext.MaxPoint.Z) / 2);
         }
     }
 }
