@@ -1,24 +1,22 @@
-using Autodesk.AutoCAD.ApplicationServices;
-using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
-using AutoCADEquipmentPlugin.Geometry;
+using Autodesk.AutoCAD.ApplicationServices;
+using AutoCADEquipmentPlugin.UI;
 
 [assembly: CommandClass(typeof(AutoCADEquipmentPlugin.Plugin))]
 
 namespace AutoCADEquipmentPlugin
 {
-    public class Plugin : IExtensionApplication
+    public class Plugin
     {
-        public void Initialize()
+        [CommandMethod("PlaceWithUI")]
+        public void PlaceWithUI()
         {
-            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\nПлагин загружен. Команда: EQP.");
-        }
-        public void Terminate() { }
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
 
-        [CommandMethod("EQP")]
-        public void RunWithUI()
-        {
-            Application.ShowModalDialog(new UI.PlaceForm());
+            // Показываем форму настроек
+            var form = new PlaceForm();
+            Application.ShowModalDialog(form);
         }
     }
 }
