@@ -10,8 +10,8 @@ namespace AutoCADEquipmentPlugin.Geometry
         /// </summary>
         public static bool IsPointInside(Polyline poly, Point3d pt)
         {
-            var cs = poly.GetPlane().GetCoordinateSystem();
-            var pt2d = pt.Convert2d(cs);
+            Plane plane = new Plane(Point3d.Origin, Vector3d.ZAxis); // по XY-плоскости
+            Point2d pt2d = pt.Convert2d(plane);
             return poly.IsPointInside(pt2d, Tolerance.Global, false);
         }
 
