@@ -45,5 +45,14 @@ namespace AutoCADEquipmentPlugin.Geometry
 
             return false;
         }
+
+        public static Point3d Center(this Extents3d ext)
+        {
+            return new Point3d(
+                (ext.MinPoint.X + ext.MaxPoint.X) / 2,
+                (ext.MinPoint.Y + ext.MaxPoint.Y) / 2,
+                (ext.MinPoint.Z + ext.MaxPoint.Z) / 2
+            );
+        }
     }
 }
