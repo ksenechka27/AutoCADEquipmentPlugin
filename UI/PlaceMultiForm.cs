@@ -1,73 +1,44 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using AutoCADEquipmentPlugin.Logic;
 
 namespace AutoCADEquipmentPlugin.UI
 {
-    public class BlockEntry
+    public partial class PlaceMultiForm : Form
     {
-        public string BlockName { get; set; }
-        public double Offset { get; set; } // в метрах
-        public int Count { get; set; }     // количество блоков
-    }
+        private List<string> blockList = new List<string>();
 
-    public class PlaceMultiForm : Form
-    {
-        private TextBox blockNameTextBox;
-        private NumericUpDown offsetUpDown;
-        private NumericUpDown countUpDown;
-        private Button addButton;
-        private Button placeButton;
-        private ListBox blockListBox;
-
-        private List<BlockEntry> blockEntries = new List<BlockEntry>();
-
-        public PlaceMultiForm()
+        private void btnPlace_Click(object sender, EventArgs e)
         {
-            Text = "Выбор блоков";
-            Width = 400;
-            Height = 300;
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            var ed = doc.Editor;
 
-            Controls.Add(new Label { Text = "Имя блока:", Top = 10, Left = 10, Width = 100 });
-            blockNameTextBox = new TextBox { Top = 10, Left = 120, Width = 150 };
-            Controls.Add(blockNameTextBox);
+            var per = ed.GetEntity(new PromptEntityOptions("\nВыберите границу помещения:") { AddAllowedClass(typeof(Polyline), false) });
+            if (per.Status != PromptStatus.OK) return;
 
-            Controls.Add(new Label { Text = "Отступ (мм):", Top = 40, Left = 10, Width = 100 });
-            offsetUpDown = new NumericUpDown { Top = 40, Left = 120, Width = 100, Minimum = 0, Maximum = 10000, Value = 500 };
-            Controls.Add(offsetUpDown);
-
-            Controls.Add(new Label { Text = "Количество:", Top = 70, Left = 10, Width = 100 });
-            countUpDown = new NumericUpDown { Top = 70, Left = 120, Width = 100, Minimum = 1, Maximum = 100 };
-            Controls.Add(countUpDown);
-
-            addButton = new Button { Text = "Добавить", Top = 100, Left = 120, Width = 100 };
-            addButton.Click += AddBlock;
-            Controls.Add(addButton);
-
-            blockListBox = new ListBox { Top = 130, Left = 10, Width = 360, Height = 80 };
-            Controls.Add(blockListBox);
-
-            placeButton = new Button { Text = "Разместить всё", Top = 220, Left = 120, Width = 120 };
-            placeButton.Click += (s, e) =>
+            Polyline boundary;
+            using (var tr = doc.Database.TransactionManager.StartTransaction())
             {
-                Close();
-                Logic.Placer.PlaceBlocks(blockEntries); // вызываем новую функцию
-            };
-            Controls.Add(placeButton);
-        }
+                boundary = (Polyline)tr.GetObject(per.ObjectId, OpenMode.ForRead);
+                if (!boundary.Closed) { ed.WriteMessage("\nПолилиния должна быть замкнутой."); return; }
+                tr.Commit();
+            }
 
-        private void AddBlock(object sender, EventArgs e)
-        {
-            var name = blockNameTextBox.Text.Trim();
-            var offset = (double)offsetUpDown.Value / 1000.0; // мм → м
-            var count = (int)countUpDown.Value;
+            var entryPr = ed.GetPoint("\nУкажите точку входа:");
+            if (entryPr.Status != PromptStatus.OK) return;
+            var exitPr = ed.GetPoint("\nУкажите точку выхода:");
+            if (exitPr.Status != PromptStatus.OK) return;
 
-            if (string.IsNullOrEmpty(name)) return;
+            // blockList заполняется из UI ранее
+            PlaceBlocks(blockList, boundary, entryPr.Value, exitPr.Value);
 
-            blockEntries.Add(new BlockEntry { BlockName = name, Offset = offset, Count = count });
-            blockListBox.Items.Add($"{name} — отступ: {offset * 1000}мм, кол-во: {count}");
-
-            blockNameTextBox.Clear();
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
     }
 }
