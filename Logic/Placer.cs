@@ -7,7 +7,7 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using AutoCADEquipmentPlugin.Logic;
 
-namespace AutoCADEquipmentPlugin.UI
+namespace AutoCADEquipmentPlugin.Logic
 {
     public partial class PlaceForm : Form
     {
