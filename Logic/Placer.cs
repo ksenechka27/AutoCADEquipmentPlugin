@@ -77,17 +77,45 @@ namespace AutoCADEquipmentPlugin.Logic
 
         private static bool TryPlaceBlock(BlockTableRecord blockDef, Point3d position, double offset, List<Entity> existingBlocks, List<Entity> obstacles, BlockTableRecord btr, Transaction tr)
         {
-            Point3d basePoint = new Point3d(position.X + offset, position.Y + offset, 0);
-            using (BlockReference br = new BlockReference(basePoint, blockDef.ObjectId))
+            Point3d basePoint = new Point3d(position.X + offset, position.Y, 0);
+            BlockReference br = new BlockReference(basePoint, blockDef.ObjectId);
+
+            if (!IntersectsAny(br, existingBlocks) && !IntersectsAny(br, obstacles))
             {
-                if (!Utils.IntersectsOther(br, existingBlocks) && !Utils.IntersectsOther(br, obstacles))
-                {
-                    btr.AppendEntity(br);
-                    tr.AddNewlyCreatedDBObject(br, true);
-                    existingBlocks.Add(br);
-                    return true;
-                }
+                btr.AppendEntity(br);
+                tr.AddNewlyCreatedDBObject(br, true);
+                existingBlocks.Add(br);
+                return true;
             }
+
+            br.Dispose();
+            return false;
+        }
+
+        private static bool IntersectsAny(BlockReference br, List<Entity> entities)
+        {
+            if (!br.Bounds.HasValue)
+                return false;
+
+            Extents3d brBounds = br.Bounds.Value;
+
+            foreach (var ent in entities)
+            {
+                if (!ent.Bounds.HasValue)
+                    continue;
+
+                Extents3d entBounds = ent.Bounds.Value;
+
+                bool intersects =
+                    brBounds.MinPoint.X <= entBounds.MaxPoint.X &&
+                    brBounds.MaxPoint.X >= entBounds.MinPoint.X &&
+                    brBounds.MinPoint.Y <= entBounds.MaxPoint.Y &&
+                    brBounds.MaxPoint.Y >= entBounds.MinPoint.Y;
+
+                if (intersects)
+                    return true;
+            }
+
             return false;
         }
     }
