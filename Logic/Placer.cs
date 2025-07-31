@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -12,36 +11,28 @@ namespace AutoCADEquipmentPlugin.Logic
     {
         public static void PlaceBlocks(List<string> blockNames, Polyline boundary, Point3d entry, Point3d exit)
         {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            Database db = doc.Database;
-            Editor ed = doc.Editor;
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            var db = doc.Database;
+            var ed = doc.Editor;
 
-            using (Transaction tr = db.TransactionManager.StartTransaction())
+            using (var tr = db.TransactionManager.StartTransaction())
             {
-                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
+                var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                var ms = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite);
 
-                List<Entity> existingBlocks = new List<Entity>();
-                List<Entity> obstacles = GetObstacles(tr, btr);
-                List<Point3d> wallPoints = GetWallPoints(boundary);
+                List<Entity> obstacles = CollectObstacles(ms, tr);
+                List<Point3d> wallPoints = ExtractWallPoints(boundary);
 
-                foreach (ObjectId id in btr)
-                {
-                    Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                    if (ent is BlockReference br)
-                        existingBlocks.Add(br);
-                }
-
-                double offset = 500.0;
                 foreach (string blockName in blockNames)
                 {
-                    if (!bt.Has(blockName)) continue;
+                    if (!bt.Has(blockName))
+                        continue;
 
-                    BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
+                    var blockDef = (BlockTableRecord)tr.GetObject(bt[blockName], OpenMode.ForRead);
 
                     foreach (Point3d pt in wallPoints)
                     {
-                        if (TryPlaceBlock(blockDef, pt, offset, existingBlocks, obstacles, btr, tr))
+                        if (TryPlace(pt, blockDef, ms, tr, obstacles))
                         {
                             ed.WriteMessage($"\nБлок '{blockName}' размещён.");
                             break;
@@ -53,69 +44,39 @@ namespace AutoCADEquipmentPlugin.Logic
             }
         }
 
-        private static List<Point3d> GetWallPoints(Polyline boundary)
+        private static List<Entity> CollectObstacles(BlockTableRecord ms, Transaction tr)
         {
-            List<Point3d> points = new List<Point3d>();
-            for (int i = 0; i < boundary.NumberOfVertices; i++)
-                points.Add(boundary.GetPoint3dAt(i));
-            return points;
-        }
-
-        private static List<Entity> GetObstacles(Transaction tr, BlockTableRecord btr)
-        {
-            List<Entity> result = new List<Entity>();
-            foreach (ObjectId id in btr)
+            var list = new List<Entity>();
+            foreach (ObjectId id in ms)
             {
-                Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent != null && !(ent is Polyline) && !(ent is BlockReference))
-                {
-                    result.Add(ent);
-                }
+                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent != null && !(ent is BlockReference) && !(ent is Polyline))
+                    list.Add(ent);
             }
-            return result;
+            return list;
         }
 
-        private static bool TryPlaceBlock(BlockTableRecord blockDef, Point3d position, double offset, List<Entity> existingBlocks, List<Entity> obstacles, BlockTableRecord btr, Transaction tr)
+        private static List<Point3d> ExtractWallPoints(Polyline boundary)
         {
-            Point3d basePoint = new Point3d(position.X + offset, position.Y, 0);
-            BlockReference br = new BlockReference(basePoint, blockDef.ObjectId);
-
-            if (!IntersectsAny(br, existingBlocks) && !IntersectsAny(br, obstacles))
+            var pts = new List<Point3d>();
+            for (int i = 0; i < boundary.NumberOfVertices; i++)
             {
-                btr.AppendEntity(br);
+                pts.Add(boundary.GetPoint3dAt(i));
+            }
+            return pts;
+        }
+
+        private static bool TryPlace(Point3d pos, BlockTableRecord def, BlockTableRecord ms,
+                                     Transaction tr, List<Entity> obstacles)
+        {
+            var br = new BlockReference(pos, def.ObjectId);
+            if (!GeometryUtils.IntersectsOther(ms, br, tr))
+            {
+                ms.AppendEntity(br);
                 tr.AddNewlyCreatedDBObject(br, true);
-                existingBlocks.Add(br);
                 return true;
             }
-
             br.Dispose();
-            return false;
-        }
-
-        private static bool IntersectsAny(BlockReference br, List<Entity> entities)
-        {
-            if (!br.Bounds.HasValue)
-                return false;
-
-            Extents3d brBounds = br.Bounds.Value;
-
-            foreach (var ent in entities)
-            {
-                if (!ent.Bounds.HasValue)
-                    continue;
-
-                Extents3d entBounds = ent.Bounds.Value;
-
-                bool intersects =
-                    brBounds.MinPoint.X <= entBounds.MaxPoint.X &&
-                    brBounds.MaxPoint.X >= entBounds.MinPoint.X &&
-                    brBounds.MinPoint.Y <= entBounds.MaxPoint.Y &&
-                    brBounds.MaxPoint.Y >= entBounds.MinPoint.Y;
-
-                if (intersects)
-                    return true;
-            }
-
             return false;
         }
     }
