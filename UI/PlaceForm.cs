@@ -1,92 +1,79 @@
-using Autodesk.AutoCAD.Geometry;
-using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.ApplicationServices;
-using Autodesk.AutoCAD.EditorInput;
+using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Windows.Forms;
 
-namespace AutoCADEquipmentPlugin.Logic
+namespace AutoCADEquipmentPlugin.UI
 {
-    public static class Utils
+    public class PlaceForm : Form
     {
-        // Получить габариты блока
-        public static Extents3d? GetBlockExtents(BlockReference br)
+        private DataGridView blockGrid;
+        private NumericUpDown offsetUpDown;
+        private CheckBox clearOldCheckBox;
+        private Button placeButton;
+
+        public PlaceForm()
         {
-            try
+            Text = "Настройки размещения оборудования";
+            Width = 450; Height = 300;
+
+            Controls.Add(new Label { Text = "Блоки для размещения:", Top = 10, Left = 10, Width = 200 });
+
+            blockGrid = new DataGridView
             {
-                var ext = br.GeometricExtents;
-                return ext;
-            }
-            catch
+                Top = 30,
+                Left = 10,
+                Width = 410,
+                Height = 150,
+                AllowUserToAddRows = true,
+                AllowUserToDeleteRows = true,
+                ColumnCount = 2,
+                RowHeadersVisible = false
+            };
+            blockGrid.Columns[0].Name = "Имя блока";
+            blockGrid.Columns[1].Name = "Количество (0 = максимум)";
+            Controls.Add(blockGrid);
+
+            Controls.Add(new Label { Text = "Отступ (мм):", Top = 190, Left = 10, Width = 100 });
+            offsetUpDown = new NumericUpDown
             {
-                return null;
-            }
-        }
+                Top = 190,
+                Left = 120,
+                Width = 100,
+                Minimum = 0,
+                Maximum = 10000,
+                Value = 500
+            };
+            Controls.Add(offsetUpDown);
 
-        // Преобразовать полилинию в список отрезков
-        public static List<LineSegment2d> ExtractSegments(Polyline pline)
-        {
-            var segments = new List<LineSegment2d>();
-            for (int i = 0; i < pline.NumberOfVertices; i++)
+            clearOldCheckBox = new CheckBox { Text = "Очистить старые", Top = 220, Left = 120, Width = 150 };
+            Controls.Add(clearOldCheckBox);
+
+            placeButton = new Button { Text = "Разместить", Top = 240, Left = 120, Width = 100 };
+            placeButton.Click += (s, e) =>
             {
-                int next = (i + 1) % pline.NumberOfVertices;
-                var p1 = pline.GetPoint2dAt(i);
-                var p2 = pline.GetPoint2dAt(next);
-                segments.Add(new LineSegment2d(p1, p2));
-            }
-            return segments;
-        }
+                var blockList = new List<(string name, int count)>();
 
-        // Проверка: точка находится внутри замкнутой полилинии
-        public static bool IsPointInside(Polyline pline, Point2d pt)
-        {
-            return pline.IsPointInside(pt, Tolerance.Global, true);
-        }
-
-        // Проверка: будет ли вставка блока пересекаться с другими объектами
-        public static bool HasIntersections(Transaction tr, BlockReference newBlock, BlockTableRecord btr, Polyline boundary)
-        {
-            var db = HostApplicationServices.WorkingDatabase;
-            var ed = Application.DocumentManager.MdiActiveDocument.Editor;
-
-            // Получаем предполагаемый экстент вставляемого блока
-            var ext = GetBlockExtents(newBlock);
-            if (ext == null) return true;
-
-            // Получаем центр блока для быстрой проверки
-            var center = (ext.Value.MinPoint + ext.Value.MaxPoint) / 2.0;
-            if (!IsPointInside(boundary, new Point2d(center.X, center.Y)))
-                return true;
-
-            // Пройтись по всем объектам и проверить пересечение
-            foreach (ObjectId id in btr)
-            {
-                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                if (ent is BlockReference existingBr)
+                foreach (DataGridViewRow row in blockGrid.Rows)
                 {
-                    if (existingBr.GeometricExtents.IntersectWith(ext.Value) != null)
-                        return true;
+                    if (row.IsNewRow) continue;
+
+                    string blockName = row.Cells[0]?.Value?.ToString();
+                    if (string.IsNullOrWhiteSpace(blockName)) continue;
+
+                    int count = 0;
+                    if (row.Cells[1]?.Value != null)
+                        int.TryParse(row.Cells[1].Value.ToString(), out count);
+
+                    blockList.Add((blockName, count));
                 }
-                else if (ent != null && ent.Bounds != null)
-                {
-                    if (ent.Bounds.Value.IntersectWith(ext.Value) != null)
-                        return true;
-                }
-            }
 
-            return false;
-        }
+                double offset = (double)offsetUpDown.Value / 1000.0;
+                bool clearOld = clearOldCheckBox.Checked;
 
-        // Угол между двумя точками (в радианах)
-        public static double GetAngle(Point2d from, Point2d to)
-        {
-            return (to - from).Angle;
-        }
-
-        // Создаёт нормализованный вектор длины length по сегменту
-        public static Vector2d GetDirection(LineSegment2d seg)
-        {
-            return (seg.EndPoint - seg.StartPoint).GetNormal();
+                Close();
+                Logic.Placer.Place(blockList, offset, clearOld);
+            };
+            Controls.Add(placeButton);
         }
     }
 }
