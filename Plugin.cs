@@ -15,8 +15,7 @@ namespace AutoCADEquipmentPlugin
             if (doc == null) return;
 
             // Показываем форму настроек
-            var form = new PlaceForm();
-            Application.ShowModelessDialog(new UI.PlaceForm());
+            Application.ShowModelessDialog(new PlaceForm());
         }
     }
 }
