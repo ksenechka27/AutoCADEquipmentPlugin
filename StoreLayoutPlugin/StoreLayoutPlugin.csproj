@@ -7,16 +7,24 @@
     <OutputType>Library</OutputType>
   </PropertyGroup>
 
-    <ItemGroup>
+  <ItemGroup>
+    <!-- Пути к AutoCAD DLL, в workflow на GitHub нужно корректно подтягивать или хранить в libs -->
     <Reference Include="AcMgd">
-      <HintPath>..\libs\acmgd.dll</HintPath>
+      <HintPath>libs\acmgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="AcDbMgd">
-      <HintPath>..\libs\acdbmgd.dll</HintPath>
+      <HintPath>libs\acdbmgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="AcCoreMgd">
-      <HintPath>..\libs\accoremgd.dll</HintPath>
+      <HintPath>libs\accoremgd.dll</HintPath>
+      <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="StoreLayoutPlugin.cs" />
   </ItemGroup>
 
 </Project>
