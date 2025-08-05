@@ -20,7 +20,7 @@ jobs:
       run: msbuild StoreLayoutPlugin.sln /p:Configuration=Release
 
     - name: Upload DLL artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: StoreLayoutPlugin-DLL
         path: StoreLayoutPlugin\bin\Release\StoreLayoutPlugin.dll
