@@ -16,11 +16,11 @@ jobs:
     - name: Setup MSBuild path
       uses: microsoft/setup-msbuild@v1.1
 
-    - name: Build project
+    - name: Build StoreLayoutPlugin
       run: msbuild StoreLayoutPlugin.sln /p:Configuration=Release
 
     - name: Upload DLL artifact
       uses: actions/upload-artifact@v3
       with:
         name: StoreLayoutPlugin-DLL
-        path: StoreLayoutPlugin/bin/Release/*.dll
+        path: StoreLayoutPlugin\bin\Release\StoreLayoutPlugin.dll
