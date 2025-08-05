@@ -7,15 +7,15 @@
     <OutputType>Library</OutputType>
   </PropertyGroup>
 
-  <ItemGroup>
+    <ItemGroup>
     <Reference Include="AcMgd">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\AcMgd.dll</HintPath>
+      <HintPath>..\libs\acmgd.dll</HintPath>
     </Reference>
     <Reference Include="AcDbMgd">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\AcDbMgd.dll</HintPath>
+      <HintPath>..\libs\acdbmgd.dll</HintPath>
     </Reference>
     <Reference Include="AcCoreMgd">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\AcCoreMgd.dll</HintPath>
+      <HintPath>..\libs\accoremgd.dll</HintPath>
     </Reference>
   </ItemGroup>
 
