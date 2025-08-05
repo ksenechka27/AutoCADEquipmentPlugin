@@ -23,8 +23,4 @@
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Compile Include="StoreLayoutPlugin.cs" />
-  </ItemGroup>
-
 </Project>
