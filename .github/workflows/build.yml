@@ -1,0 +1,26 @@
+name: Build AutoCAD Plugin DLL
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup MSBuild path
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Build project
+      run: msbuild StoreLayoutPlugin.sln /p:Configuration=Release
+
+    - name: Upload DLL artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: StoreLayoutPlugin-DLL
+        path: StoreLayoutPlugin/bin/Release/*.dll
