@@ -13,8 +13,6 @@ namespace StoreLayoutPlugin
 {
     public class StoreLayout
     {
-        private List<Polyline> forbiddenZones = new List<Polyline>();
-
         [CommandMethod("PlaceEquipmentOptimized")]
         public void PlaceEquipmentOptimized()
         {
@@ -24,151 +22,201 @@ namespace StoreLayoutPlugin
 
             try
             {
-                // 1. Выбор основной зоны размещения (верхний слой)
-                var zonePline = PromptForClosedPolyline(ed, "\nВыберите полилинию - контур зоны размещения оборудования: ");
-                if (zonePline == null) return;
+                // 1. Выбор зоны размещения
+                ed.WriteMessage("\nВыберите зону размещения оборудования.");
+                Polyline placementZone = PromptForClosedPolyline(ed, "\nВыберите полилинию - контур зоны размещения оборудования: ");
+                if (placementZone == null) return;
+                ed.WriteMessage($"\nЗона размещения выбрана. Площадь: {placementZone.Area:F2} кв.м.");
 
-                ed.WriteMessage($"\nПлощадь зоны размещения: {zonePline.Area:F2} кв.м.");
-
-                // 2. Выбор точек старта и финиша внутри зоны
-                Point3d startPt = PromptForPointInsidePolyline(ed, zonePline, "\nУкажите точку старта размещения оборудования: ");
+                // 2. Точка старта размещения
+                ed.WriteMessage("\nВыберите точку старта размещения оборудования.");
+                Point3d startPt = PromptForPointInsidePolyline(ed, placementZone, "\nУкажите точку старта размещения оборудования: ");
                 if (startPt == Point3d.Origin) return;
 
-                Point3d endPt = PromptForPointInsidePolyline(ed, zonePline, "\nУкажите точку финиша размещения оборудования: ");
+                // 3. Точка финиша размещения
+                ed.WriteMessage("\nВыберите точку финиша размещения оборудования.");
+                Point3d endPt = PromptForPointInsidePolyline(ed, placementZone, "\nУкажите точку финиша размещения оборудования: ");
                 if (endPt == Point3d.Origin) return;
-
                 ed.WriteMessage($"\nСтарт: {startPt}, Финиш: {endPt}");
 
-                // 3. Выбор запретных зон
-                forbiddenZones = new List<Polyline>();
-                while(true)
+                // 4. Выбор зоны с оборудованием
+                ed.WriteMessage("\nВыберите зону с оборудованием (полилиния).");
+                Polyline equipmentZone = PromptForClosedPolyline(ed, "\nВыберите полилинию - контур зоны с оборудованием: ");
+                if (equipmentZone == null) return;
+                ed.WriteMessage($"\nЗона с оборудованием выбрана. Площадь: {equipmentZone.Area:F2} кв.м.");
+
+                // 5. Поиск блоков оборудования (стелажи) внутри этой зоны
+                List<BlockReference> equipmentBlocks = GetBlocksInsidePolyline(db, equipmentZone, ed);
+                ed.WriteMessage($"\nНайдено блоков оборудования (стелажей) внутри зоны с оборудованием: {equipmentBlocks.Count}");
+                if (equipmentBlocks.Count == 0)
                 {
-                    PromptKeywordOptions pko = new PromptKeywordOptions("\nДобавить запретную зону? [Да/Нет]: ","Да Нет");
-                    var pkr = ed.GetKeywords(pko);
-                    if (pkr.Status != PromptStatus.OK || pkr.StringResult == "Нет")
-                        break;
-
-                    var forbidZone = PromptForClosedPolyline(ed, "\nВыберите полилинию - запретная зона: ");
-                    if(forbidZone != null)
-                    {
-                        forbiddenZones.Add(forbidZone);
-                        ed.WriteMessage($"\nЗапретная зона добавлена (площадь: {forbidZone.Area:F2} кв.м.).");
-                    }
-                }
-
-                // 4. Поиск оборудования вне зоны размещения (замкнутой полилинии)
-                var equipmentsOutside = GetBlocksOutsidePolyline(db, zonePline, ed);
-
-                if (equipmentsOutside.Count == 0)
-                {
-                    ed.WriteMessage("\nОборудование вне зоны размещения не найдено. Выход.");
+                    ed.WriteMessage("\nВ зоне с оборудованием блоки не найдены. Выход.");
                     return;
                 }
-                ed.WriteMessage($"\nНайдено {equipmentsOutside.Count} единиц оборудования вне зоны.");
 
-                // 5. Генерация последовательности рядов (разбиение зоны на параллельные линии)
-                var rows = GenerateRows(zonePline, 1.5); // 1.5м — условная ширина ряда для размещения
+                // 6. Запуск размещения блоков
+                ed.WriteMessage("\nНачинается размещение оборудования...");
 
-                // 6. Размещение оборудования вдоль рядов жадным алгоритмом с ориентацией вдоль стены
-                using(Transaction tr = db.TransactionManager.StartTransaction())
-                {
-                    BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
-                    BlockTableRecord btr = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+                PlaceBlocksAlongRows(ed, db, placementZone, startPt, endPt, equipmentBlocks);
 
-                    DrawHelper.DrawCircle(btr, tr, startPt, 0.3);
-                    DrawHelper.DrawCircle(btr, tr, endPt, 0.3);
-
-                    List<BoundingBox2d> placedBoxes = new List<BoundingBox2d>();
-
-                    int eqIndex = 0;
-                    foreach(var row in rows)
-                    {
-                        var availableSegments = GetAvailableSegments(row, zonePline, forbiddenZones);
-                        foreach(var segment in availableSegments)
-                        {
-                            double segmentLength = segment.Item1.GetDistanceTo(segment.Item2);
-                            double currentOffset = 0;
-
-                            while(eqIndex < equipmentsOutside.Count && currentOffset < segmentLength)
-                            {
-                                var block = equipmentsOutside[eqIndex];
-                                var extents = block.GeometricExtents;
-                                double length = extents.MaxPoint.X - extents.MinPoint.X;
-                                double width = extents.MaxPoint.Y - extents.MinPoint.Y;
-
-                                if(currentOffset + length > segmentLength)
-                                    break; // не помещается на текущем сегменте
-
-                                // Позиция размещения вдоль ряда
-                                var dirVec = (segment.Item2 - segment.Item1).GetNormal();
-                                Point2d placePos2d = segment.Item1 + dirVec.MultiplyBy(currentOffset + length / 2) + row.Normal.MultiplyBy(width / 2);
-
-                                // Проверка попадания внутрь зоны и не в запрещенной зоне
-                                if(!IsPointInPolyline(zonePline, placePos2d) || forbiddenZones.Any(fz => IsPointInPolyline(fz, placePos2d)))
-                                {
-                                    currentOffset += length + 0.1; // небольшой сдвиг
-                                    continue;
-                                }
-
-                                // Создаем bounding box и проверяем пересечения
-                                BoundingBox2d newBox = CreateBoundingBox(placePos2d, length, width, dirVec);
-                                bool collision = placedBoxes.Any(box => box.Intersects(newBox));
-                                if(collision)
-                                {
-                                    currentOffset += 0.2; // сдвигаемся и пробуем снова
-                                    continue;
-                                }
-
-                                // Расчёт ориентации блока — длинная сторона вдоль стены
-                                double blockRotation = CalculateBlockRotation(block, dirVec);
-
-                                // Размещаем блок с поворотом
-                                block.UpgradeOpen();
-                                block.Position = new Autodesk.AutoCAD.Geometry.Point3d(placePos2d.X, placePos2d.Y, block.Position.Z);
-                                block.Rotation = blockRotation;
-
-                                placedBoxes.Add(newBox);
-                                ed.WriteMessage($"\nРазмещено: {block.Name} на {block.Position} с поворотом {blockRotation * 180/Math.PI:F1}°");
-
-                                currentOffset += length + 0.2;
-                                eqIndex++;
-
-                                if(eqIndex >= equipmentsOutside.Count)
-                                    break;
-                            }
-
-                            if(eqIndex >= equipmentsOutside.Count)
-                                break;
-                        }
-                        if(eqIndex >= equipmentsOutside.Count)
-                            break;
-                    }
-
-                    if(eqIndex < equipmentsOutside.Count)
-                        ed.WriteMessage($"\nВнимание: не удалось разместить {equipmentsOutside.Count - eqIndex} единиц оборудования.");
-
-                    tr.Commit();
-                }
+                ed.WriteMessage("\nРазмещение завершено.");
             }
-            catch(Exception ex)
+            catch (Autodesk.AutoCAD.Runtime.Exception ex)
             {
-                ed.WriteMessage("\nОшибка: " + ex.Message);
+                ed.WriteMessage("\nAutoCAD Runtime ошибка: " + ex.Message);
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage("\nОбщая ошибка: " + ex.Message);
             }
         }
 
-        private double CalculateBlockRotation(BlockReference block, Vector2d wallDirection)
+        private void PlaceBlocksAlongRows(Editor ed, Database db, Polyline placementZone, Point3d startPt, Point3d endPt, List<BlockReference> blocksToPlace)
         {
-            var extents = block.GeometricExtents;
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+                BlockTableRecord btr = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite) as BlockTableRecord;
+
+                // Нарисовать точки старта и финиша для визуализации
+                DrawHelper.DrawCircle(btr, tr, startPt, 0.3);
+                DrawHelper.DrawCircle(btr, tr, endPt, 0.3);
+
+                List<BoundingBox2d> placedBoxes = new List<BoundingBox2d>();
+
+                // Генерация рядов между стартом и финишем
+                List<Row> rows = GenerateRowsBetweenPoints(startPt, endPt, 1.5);
+
+                int eqIndex = 0;
+                foreach (Row row in rows)
+                {
+                    var availableSegments = new List<Tuple<Point2d, Point2d>> { Tuple.Create(row.Start, row.End) };
+
+                    foreach (var segment in availableSegments)
+                    {
+                        double segmentLength = segment.Item1.GetDistanceTo(segment.Item2);
+                        double currentOffset = 0;
+
+                        while (eqIndex < blocksToPlace.Count && currentOffset < segmentLength)
+                        {
+                            BlockReference block = blocksToPlace[eqIndex];
+
+                            // Получаем объект с нужным режимом открытия для редактирования
+                            BlockReference blockForWrite = tr.GetObject(block.ObjectId, OpenMode.ForWrite) as BlockReference;
+
+                            Extents3d extents = blockForWrite.GeometricExtents;
+                            double length = extents.MaxPoint.X - extents.MinPoint.X;
+                            double width = extents.MaxPoint.Y - extents.MinPoint.Y;
+
+                            if (currentOffset + length > segmentLength)
+                                break;
+
+                            Vector2d dirVec = (segment.Item2 - segment.Item1).GetNormal();
+                            Point2d placePos2d = segment.Item1 + dirVec.MultiplyBy(currentOffset + length / 2) + row.Normal.MultiplyBy(width / 2);
+
+                            if (!IsPointInPolyline(placementZone, placePos2d))
+                            {
+                                currentOffset += length + 0.1;
+                                continue;
+                            }
+
+                            BoundingBox2d newBox = CreateBoundingBox(placePos2d, length, width, dirVec);
+                            bool collision = placedBoxes.Any(box => box.Intersects(newBox));
+                            if (collision)
+                            {
+                                currentOffset += 0.2;
+                                continue;
+                            }
+
+                            double blockRotation = CalculateBlockRotation(blockForWrite, dirVec);
+
+                            // Теперь объект открыт для записи, безопасно изменяем
+                            blockForWrite.Position = new Point3d(placePos2d.X, placePos2d.Y, blockForWrite.Position.Z);
+                            blockForWrite.Rotation = blockRotation;
+
+                            placedBoxes.Add(newBox);
+                            ed.WriteMessage($"\nРазмещено: {blockForWrite.Name} на {blockForWrite.Position} с поворотом {blockRotation * 180 / Math.PI:F1}°");
+
+                            currentOffset += length + 0.2;
+                            eqIndex++;
+
+                            if (eqIndex >= blocksToPlace.Count)
+                                break;
+                        }
+                        if (eqIndex >= blocksToPlace.Count)
+                            break;
+                    }
+                    if (eqIndex >= blocksToPlace.Count)
+                        break;
+                }
+
+                if (eqIndex < blocksToPlace.Count)
+                    ed.WriteMessage($"\nВнимание: не удалось разместить {blocksToPlace.Count - eqIndex} единиц оборудования.");
+
+                tr.Commit();
+            }
+        }
+
+        private List<BlockReference> GetBlocksInsidePolyline(Database db, Polyline polyline, Editor ed)
+        {
+            List<BlockReference> result = new List<BlockReference>();
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+                BlockTableRecord ms = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+
+                foreach (ObjectId id in ms)
+                {
+                    Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                    if (ent is BlockReference blkRef)
+                    {
+                        Point3d pos = blkRef.Position;
+                        string blkName = blkRef.Name.ToLowerInvariant();
+                        ed.WriteMessage($"\nНайден блок: {blkName} на позиции {pos}");
+
+                        if (IsPointInPolyline(polyline, new Point2d(pos.X, pos.Y)) &&
+                            blkName.Contains("стеллаж")) // фильтр по имени "стеллаж"
+                        {
+                            result.Add(blkRef);
+                        }
+                    }
+                }
+                tr.Commit();
+            }
+            ed.WriteMessage($"\nВсего блоков с фильтром 'стеллаж': {result.Count}");
+            return result;
+        }
+
+        private List<Row> GenerateRowsBetweenPoints(Point3d startPt, Point3d endPt, double rowWidth)
+        {
+            Vector2d baseVec = new Vector2d(endPt.X - startPt.X, endPt.Y - startPt.Y).GetNormal();
+            Vector2d normal = new Vector2d(-baseVec.Y, baseVec.X);
+
+            double distance = startPt.DistanceTo(endPt);
+            int rowCount = (int)(distance / rowWidth) + 1;
+
+            List<Row> rows = new List<Row>();
+            for (int i = 0; i < rowCount; i++)
+            {
+                Point2d rowStart = new Point2d(startPt.X, startPt.Y) + normal.MultiplyBy(i * rowWidth);
+                Point2d rowEnd = new Point2d(endPt.X, endPt.Y) + normal.MultiplyBy(i * rowWidth);
+                rows.Add(new Row() { Start = rowStart, End = rowEnd, Normal = normal });
+            }
+            return rows;
+        }
+
+        private double CalculateBlockRotation(BlockReference block, Vector2d direction)
+        {
+            Extents3d extents = block.GeometricExtents;
             double length = extents.MaxPoint.X - extents.MinPoint.X;
             double width = extents.MaxPoint.Y - extents.MinPoint.Y;
 
-            bool lengthIsLonger = length >= width;
-            double wallAngle = Math.Atan2(wallDirection.Y, wallDirection.X);
+            bool lengthLonger = length >= width;
+            double angle = Math.Atan2(direction.Y, direction.X);
 
-            return lengthIsLonger ? wallAngle : wallAngle + Math.PI / 2;
+            return lengthLonger ? angle : angle + Math.PI / 2;
         }
-
-        private List<Polyline> forbiddenZones = new List<Polyline>();
 
         private Polyline PromptForClosedPolyline(Editor ed, string message)
         {
@@ -183,7 +231,7 @@ namespace StoreLayoutPlugin
                 var pl = tr.GetObject(per.ObjectId, OpenMode.ForRead) as Polyline;
                 if (pl == null || !pl.Closed)
                 {
-                    ed.WriteMessage("\nПолилиния должна быть замкнутой.");
+                    ed.WriteMessage("\nОшибка: выбранный объект не является замкнутой полилинией.");
                     return null;
                 }
                 tr.Commit();
@@ -191,28 +239,28 @@ namespace StoreLayoutPlugin
             }
         }
 
-        private Point3d PromptForPointInsidePolyline(Editor ed, Polyline pl, string message)
+        private Point3d PromptForPointInsidePolyline(Editor ed, Polyline polyline, string message)
         {
             var ppo = new PromptPointOptions(message);
             while (true)
             {
                 var ppr = ed.GetPoint(ppo);
                 if (ppr.Status != PromptStatus.OK) return Point3d.Origin;
-                if (IsPointInPolyline(pl, new Point2d(ppr.Value.X, ppr.Value.Y)))
+                if (IsPointInPolyline(polyline, new Point2d(ppr.Value.X, ppr.Value.Y)))
                     return ppr.Value;
                 ed.WriteMessage("\nТочка должна находиться внутри выбранного контура.");
             }
         }
 
-        private bool IsPointInPolyline(Polyline pline, Point2d point)
+        private bool IsPointInPolyline(Polyline polyline, Point2d point)
         {
             int crossings = 0;
-            int numVerts = pline.NumberOfVertices;
+            int numVerts = polyline.NumberOfVertices;
 
             for (int i = 0; i < numVerts; i++)
             {
-                Point2d v1 = pline.GetPoint2dAt(i);
-                Point2d v2 = pline.GetPoint2dAt((i + 1) % numVerts);
+                Point2d v1 = polyline.GetPoint2dAt(i);
+                Point2d v2 = polyline.GetPoint2dAt((i + 1) % numVerts);
 
                 if (((v1.Y > point.Y) != (v2.Y > point.Y)))
                 {
@@ -222,74 +270,6 @@ namespace StoreLayoutPlugin
                 }
             }
             return (crossings % 2) == 1;
-        }
-
-        private List<BlockReference> GetBlocksOutsidePolyline(Database db, Polyline polyline, Editor ed)
-        {
-            List<BlockReference> result = new List<BlockReference>();
-            using (var tr = db.TransactionManager.StartTransaction())
-            {
-                BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
-                BlockTableRecord btr = tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
-
-                foreach (ObjectId id in btr)
-                {
-                    var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                    if (ent is BlockReference blkRef)
-                    {
-                        Point3d pos = blkRef.Position;
-                        if (!IsPointInPolyline(polyline, new Point2d(pos.X, pos.Y)))
-                        {
-                            result.Add(blkRef);
-                        }
-                    }
-                }
-                tr.Commit();
-            }
-            return result;
-        }
-
-        private List<Row> GenerateRows(Polyline zone, double rowWidth)
-        {
-            var points = zone.GetPoints2d();
-            if(points.Count < 3) return new List<Row>();
-
-            Vector2d baseEdge = (points[1] - points[0]).GetNormal();
-            Vector2d normal = new Vector2d(-baseEdge.Y, baseEdge.X);
-
-            var projections = points.Select(p => p.DotProduct(normal)).ToList();
-            double minProj = projections.Min();
-            double maxProj = projections.Max();
-
-            List<Row> rows = new List<Row>();
-            for(double offset = minProj; offset <= maxProj; offset += rowWidth)
-            {
-                Point2d start = points[0] + normal.MultiplyBy(offset - projections[0]);
-                Point2d end = points[1] + normal.MultiplyBy(offset - projections[1]);
-                rows.Add(new Row() { Start = start, End = end, Normal = normal });
-            }
-            return rows;
-        }
-
-        private List<Tuple<Point2d, Point2d>> GetAvailableSegments(Row row, Polyline zone, List<Polyline> forbZones)
-        {
-            return new List<Tuple<Point2d, Point2d>> { Tuple.Create(row.Start, row.End) };
-        }
-
-        private int FindNearestVertexIndex(List<Point2d> points, Point2d target)
-        {
-            int bestIndex = 0;
-            double minDist = double.MaxValue;
-            for (int i = 0; i < points.Count; i++)
-            {
-                double dist = points[i].GetDistanceTo(target);
-                if (dist < minDist)
-                {
-                    minDist = dist;
-                    bestIndex = i;
-                }
-            }
-            return bestIndex;
         }
 
         private BoundingBox2d CreateBoundingBox(Point2d basePos, double length, double width, Vector2d direction)
@@ -307,30 +287,40 @@ namespace StoreLayoutPlugin
 
             return new BoundingBox2d(new Point2d(minX, minY), new Point2d(maxX, maxY));
         }
+    }
 
-        private class Row
+    public class Row
+    {
+        public Point2d Start { get; set; }
+        public Point2d End { get; set; }
+        public Vector2d Normal { get; set; }
+    }
+
+    public class BoundingBox2d
+    {
+        public Point2d MinPoint { get; }
+        public Point2d MaxPoint { get; }
+
+        public BoundingBox2d(Point2d minPoint, Point2d maxPoint)
         {
-            public Point2d Start { get; set; }
-            public Point2d End { get; set; }
-            public Vector2d Normal { get; set; }
+            MinPoint = minPoint;
+            MaxPoint = maxPoint;
+        }
+
+        public bool Intersects(BoundingBox2d other)
+        {
+            return !(other.MinPoint.X > MaxPoint.X || other.MaxPoint.X < MinPoint.X ||
+                     other.MinPoint.Y > MaxPoint.Y || other.MaxPoint.Y < MinPoint.Y);
         }
     }
 
-    static class DrawHelper
+    public static class DrawHelper
     {
         public static void DrawCircle(BlockTableRecord btr, Transaction tr, Point3d center, double radius)
         {
             Circle circle = new Circle(center, Vector3d.ZAxis, radius);
             btr.AppendEntity(circle);
             tr.AddNewlyCreatedDBObject(circle, true);
-        }
-
-        public static List<Point2d> GetPoints2d(this Polyline pline)
-        {
-            List<Point2d> pts = new List<Point2d>();
-            for (int i = 0; i < pline.NumberOfVertices; i++)
-                pts.Add(pline.GetPoint2dAt(i));
-            return pts;
         }
     }
 }
