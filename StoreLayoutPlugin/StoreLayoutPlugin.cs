@@ -14,10 +14,11 @@ namespace StoreLayoutPlugin
     {
         private const double PointTolerance = 0.2;
         private const double GapBetweenBlocks = 0.1;
-        private const double AngleThresholdDegrees = 15.0;
+        // Убираем смещение внутрь, теперь позиция блока на линии
+        private const double OffsetInside = 0.0; 
 
-        [CommandMethod("PlaceEquipmentAlongPerimeter")]
-        public void PlaceEquipmentAlongPerimeter()
+        [CommandMethod("PlaceEquipmentAlongPerimeterInsideFixed")]
+        public void PlaceEquipmentAlongPerimeterInsideFixed()
         {
             var doc = Application.DocumentManager.MdiActiveDocument;
             var ed = doc.Editor;
@@ -25,8 +26,8 @@ namespace StoreLayoutPlugin
 
             try
             {
-                ed.WriteMessage("\nВыберите замкнутую полилинию — периметр торгового зала:");
-                Polyline perimeter = PromptForClosedPolyline(ed, "\nВыберите полилинию — периметр торгового зала:");
+                ed.WriteMessage("\nВыберите замкнутую полилинию — периметр торгового зала (по часовой стрелке):");
+                Polyline perimeter = PromptForClosedPolyline(ed, "\nВыберите периметр торгового зала:");
                 if (perimeter == null) return;
 
                 ed.WriteMessage("\nВыберите прямоугольник (замкнутую полилинию) с оборудованием:");
@@ -35,20 +36,15 @@ namespace StoreLayoutPlugin
 
                 List<BlockReference> equipmentBlocks = GetBlocksInsidePolyline(db, equipmentRect, ed);
                 ed.WriteMessage($"\nНайдено блоков оборудования внутри прямоугольника: {equipmentBlocks.Count}");
-                if (equipmentBlocks.Count == 0)
-                {
-                    ed.WriteMessage("\nВ выбранном прямоугольнике оборудование не найдено. Выход.");
-                    return;
-                }
+                if (equipmentBlocks.Count == 0) return;
 
-                // Разбиваем периметр на сегменты — ребра полигона между последовательными вершинами
                 List<Tuple<Point3d, Point3d>> segments = GetPerimeterSegments(perimeter);
-                ed.WriteMessage($"\nПериметр разбит на {segments.Count} сегментов (рёбер).");
+                ed.WriteMessage($"\nПериметр разбит на {segments.Count} сегментов.");
 
-                Point3d startPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку старта размещения оборудования:");
+                Point3d startPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку старта размещения:");
                 if (startPt == Point3d.Origin) return;
 
-                Point3d endPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку окончания размещения оборудования:");
+                Point3d endPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку окончания размещения:");
                 if (endPt == Point3d.Origin) return;
 
                 int startSegmentIndex = FindSegmentIndexByPointOnPolyline(perimeter, startPt);
@@ -60,65 +56,66 @@ namespace StoreLayoutPlugin
                     return;
                 }
 
-                ed.WriteMessage($"\nСтартовый сегмент: {startSegmentIndex}, конечный сегмент: {endSegmentIndex}");
+                List<int> segmentOrder = GetSegmentOrder(startSegmentIndex, endSegmentIndex, segments.Count);
 
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
                     BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                     BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
 
-                    List<int> segmentOrder = GetSegmentOrder(startSegmentIndex, endSegmentIndex, segments.Count);
                     int blockIndex = 0;
-                    bool placementDone = false;
 
                     foreach (int segIdx in segmentOrder)
                     {
-                        if (placementDone)
+                        if (blockIndex >= equipmentBlocks.Count)
                             break;
 
                         var segment = segments[segIdx];
                         Point3d segStart = segment.Item1;
                         Point3d segEnd = segment.Item2;
 
+                        // ВАЖНО: если это стартовый сегмент, позиция начала равна точке старта (без смещения!)
                         Point3d placeStart = (segIdx == startSegmentIndex) ? startPt : segStart;
+                        // Аналогично для конечного сегмента
                         Point3d placeEnd = (segIdx == endSegmentIndex) ? endPt : segEnd;
 
                         Vector3d segVector = placeEnd - placeStart;
                         double segLength = segVector.Length;
                         Vector3d segDirection = segVector.GetNormal();
 
+                        // Получаем нормаль, но она теперь нужна только если бы смещали внутрь; тут осталась для возможных проверок
+                        Vector3d insideNormal = GetInsideNormal(perimeter, segIdx);
+
                         double currentOffset = 0.0;
 
-                        while (blockIndex < equipmentBlocks.Count && currentOffset < segLength)
+                        while (blockIndex < equipmentBlocks.Count && currentOffset <= segLength)
                         {
                             var blk = equipmentBlocks[blockIndex];
                             Extents3d extents = blk.GeometricExtents;
-                            double length = extents.MaxPoint.X - extents.MinPoint.X;
-                            double width = extents.MaxPoint.Y - extents.MinPoint.Y;
 
+                            double blockLength = extents.MaxPoint.X - extents.MinPoint.X; // длинная сторона - X
+                            double blockWidth = extents.MaxPoint.Y - extents.MinPoint.Y;
+
+                            // Если блок не помещается на оставшемся отрезке - выходим из цикла по сегменту
+                            if (currentOffset + blockLength > segLength)
+                                break;
+
+                            // Позиция блока на линии периметра - длинная сторона блока ориентирована вдоль сегмента
+                            Point3d positionOnSegment = placeStart + segDirection.MultiplyBy(currentOffset + blockLength / 2);
+
+                            // Убираем сдвиг внутрь, позиция ровно по линии
+                            Point3d blockPosition = positionOnSegment; 
+
+                            // Поворот: длинная сторона вдоль направления сегмента
                             double rotationAngle = Math.Atan2(segDirection.Y, segDirection.X);
 
-                            if (currentOffset + length <= segLength)
-                            {
-                                Point3d position = placeStart + segDirection.MultiplyBy(currentOffset + length / 2);
-                                CreateBlockReference(tr, ms, blk.Name, position, rotationAngle);
-                                ed.WriteMessage($"\nРазмещён блок '{blk.Name}' с поворотом {rotationAngle * 180.0 / Math.PI:F1}° на позиции {position}");
-                                currentOffset += length + GapBetweenBlocks;
-                                blockIndex++;
-                            }
-                            else if (currentOffset + width <= segLength)
-                            {
-                                double altRotation = rotationAngle + Math.PI / 2;
-                                Point3d position = placeStart + segDirection.MultiplyBy(currentOffset + width / 2);
-                                CreateBlockReference(tr, ms, blk.Name, position, altRotation);
-                                ed.WriteMessage($"\nРазмещён блок '{blk.Name}' с альтернативным поворотом {altRotation * 180.0 / Math.PI:F1}° на позиции {position}");
-                                currentOffset += width + GapBetweenBlocks;
-                                blockIndex++;
-                            }
-                            else
-                            {
-                                break;
-                            }
+                            // Создаём блок в нужном месте с поворотом
+                            CreateBlockReference(tr, ms, blk.Name, blockPosition, rotationAngle);
+
+                            ed.WriteMessage($"\nРазмещён блок '{blk.Name}' с поворотом {rotationAngle * 180.0 / Math.PI:F1}° на позиции {blockPosition}");
+
+                            currentOffset += blockLength + GapBetweenBlocks;
+                            blockIndex++;
                         }
                     }
 
@@ -126,9 +123,7 @@ namespace StoreLayoutPlugin
 
                     ed.WriteMessage($"\nРазмещено блоков: {blockIndex} из {equipmentBlocks.Count}");
                     if (blockIndex < equipmentBlocks.Count)
-                    {
                         ed.WriteMessage($"\nНе размещено блоков: {equipmentBlocks.Count - blockIndex}");
-                    }
                 }
             }
             catch (Autodesk.AutoCAD.Runtime.Exception ex)
@@ -141,46 +136,34 @@ namespace StoreLayoutPlugin
             }
         }
 
-        // Разбитие периметра на все рёбра — последовательные вершины
-        private List<Tuple<Point3d, Point3d>> GetPerimeterSegments(Polyline pl)
+        // Вычисление нормали внутрь полигона для возможного использования (оставляем на будущее)
+        private Vector3d GetInsideNormal(Polyline perimeter, int segIdx)
         {
-            var segments = new List<Tuple<Point3d, Point3d>>();
-            int n = pl.NumberOfVertices;
-            for (int i = 0; i < n; i++)
+            int n = perimeter.NumberOfVertices;
+
+            Point2d p0 = perimeter.GetPoint2dAt(segIdx);
+            Point2d p1 = perimeter.GetPoint2dAt((segIdx + 1) % n);
+
+            Vector2d edgeVector = p1 - p0;
+            Vector2d normal = edgeVector.GetNormal();
+
+            Vector2d leftNormal = new Vector2d(-normal.Y, normal.X);
+
+            Point2d testPoint = p0 + leftNormal * 0.1;
+
+            bool isInside = IsPointInPolyline(perimeter, testPoint);
+            if (isInside)
             {
-                Point3d start = pl.GetPoint3dAt(i);
-                Point3d end = pl.GetPoint3dAt((i + 1) % n);
-                segments.Add(Tuple.Create(start, end));
+                return new Vector3d(leftNormal.X, leftNormal.Y, 0);
             }
-            return segments;
+            else
+            {
+                Vector2d rightNormal = new Vector2d(normal.Y, -normal.X);
+                return new Vector3d(rightNormal.X, rightNormal.Y, 0);
+            }
         }
 
-        // Находит индекс сегмента, которому принадлежит точка, по параметру ломаной
-        private int FindSegmentIndexByPointOnPolyline(Polyline pl, Point3d pt)
-        {
-            try
-            {
-                double param = pl.GetParameterAtPoint(pt);
-                int index = (int)Math.Floor(param);
-                if (index >= 0 && index < pl.NumberOfVertices)
-                    return index;
-            }
-            catch { }
-            return -1;
-        }
-
-        // Формирование порядка обхода сегментов (по возрастанию индексов с переходом на 0)
-        private List<int> GetSegmentOrder(int startSeg, int endSeg, int segCount)
-        {
-            var order = new List<int> { startSeg };
-            int current = startSeg;
-            while (current != endSeg)
-            {
-                current = (current + 1) % segCount;
-                order.Add(current);
-            }
-            return order;
-        }
+        // --- Вспомогательные методы из вашего исходного кода (без изменений) ---
 
         private Polyline PromptForClosedPolyline(Editor ed, string prompt)
         {
@@ -227,6 +210,44 @@ namespace StoreLayoutPlugin
             return closest.DistanceTo(pt) <= tol;
         }
 
+        private List<Tuple<Point3d, Point3d>> GetPerimeterSegments(Polyline pl)
+        {
+            var segments = new List<Tuple<Point3d, Point3d>>();
+            int n = pl.NumberOfVertices;
+            for (int i = 0; i < n; i++)
+            {
+                Point3d start = pl.GetPoint3dAt(i);
+                Point3d end = pl.GetPoint3dAt((i + 1) % n);
+                segments.Add(Tuple.Create(start, end));
+            }
+            return segments;
+        }
+
+        private int FindSegmentIndexByPointOnPolyline(Polyline pl, Point3d pt)
+        {
+            try
+            {
+                double param = pl.GetParameterAtPoint(pt);
+                int index = (int)Math.Floor(param);
+                if (index >= 0 && index < pl.NumberOfVertices)
+                    return index;
+            }
+            catch { }
+            return -1;
+        }
+
+        private List<int> GetSegmentOrder(int startSeg, int endSeg, int segCount)
+        {
+            var order = new List<int> { startSeg };
+            int current = startSeg;
+            while (current != endSeg)
+            {
+                current = (current + 1) % segCount;
+                order.Add(current);
+            }
+            return order;
+        }
+
         private List<BlockReference> GetBlocksInsidePolyline(Database db, Polyline polyline, Editor ed)
         {
             var blocks = new List<BlockReference>();
@@ -253,7 +274,6 @@ namespace StoreLayoutPlugin
             return blocks;
         }
 
-        // Проверка включения точки внутрь замкнутой 2D полилинии алгоритмом лучевого пересечения
         private bool IsPointInPolyline(Polyline polyline, Point2d point)
         {
             int crossings = 0;
