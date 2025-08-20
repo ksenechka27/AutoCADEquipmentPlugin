@@ -1,24 +1,38 @@
 using System;
 using System.Collections.Generic;
+using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
-using Autodesk.AutoCAD.Runtime;
+using Autodesk.AutoCAD.EditorInput;
 
-[assembly: CommandClass(typeof(StoreLayoutPlugin.StoreLayout))]
+// Определяем алиасы для исключений чтобы избежать неоднозначности
+using AcadException = Autodesk.AutoCAD.Runtime.Exception;
+using SysException = System.Exception;
 
-namespace StoreLayoutPlugin
+[assembly: CommandClass(typeof(AutoEquipPlacementPlugin.PlaceEquipmentCommands))]
+
+namespace AutoEquipPlacementPlugin
 {
-    public class StoreLayout
+    public class PlaceEquipmentCommands : IExtensionApplication
     {
-        private const double PointTolerance = 0.2;
-        private const double GapBetweenBlocks = 0.1;
-        // Убираем смещение внутрь, теперь позиция блока на линии
-        private const double OffsetInside = 0.0; 
+        private const double MinGap = 0.1;         // Минимальный зазор между блоками и стеной
+        private const double MaxShift = 0.2;       // Максимальное смещение вдоль сегмента (20 см)
+        private const double ShiftStep = 0.01;     // Шаг смещения 1 см
+        private const double GapBetweenBlocks = 0.1; // Зазор между блоками
 
-        [CommandMethod("PlaceEquipmentAlongPerimeterInsideFixed")]
-        public void PlaceEquipmentAlongPerimeterInsideFixed()
+        public void Initialize()
+        {
+            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\nAutoEquipPlacement Plugin loaded.\n");
+        }
+
+        public void Terminate()
+        {
+            Application.DocumentManager.MdiActiveDocument.Editor.WriteMessage("\nAutoEquipPlacement Plugin terminated.\n");
+        }
+
+        [CommandMethod("PlaceEquipPerimeter")]
+        public void PlaceEquipmentPerimeter()
         {
             var doc = Application.DocumentManager.MdiActiveDocument;
             var ed = doc.Editor;
@@ -26,40 +40,70 @@ namespace StoreLayoutPlugin
 
             try
             {
-                ed.WriteMessage("\nВыберите замкнутую полилинию — периметр торгового зала (по часовой стрелке):");
-                Polyline perimeter = PromptForClosedPolyline(ed, "\nВыберите периметр торгового зала:");
-                if (perimeter == null) return;
+                var peo = new PromptEntityOptions("\nВыберите замкнутую полилинию (периметр торгового зала по часовой стрелке): ");
+                peo.SetRejectMessage("\nВыбран не полилиния.");
+                peo.AddAllowedClass(typeof(Polyline), false);
+                var resPerim = ed.GetEntity(peo);
+                if (resPerim.Status != PromptStatus.OK) return;
+                ObjectId perimeterId = resPerim.ObjectId;
 
-                ed.WriteMessage("\nВыберите прямоугольник (замкнутую полилинию) с оборудованием:");
-                Polyline equipmentRect = PromptForClosedPolyline(ed, "\nВыберите прямоугольник с оборудованием:");
-                if (equipmentRect == null) return;
+                var rectOpt = new PromptEntityOptions("\nВыберите прямоугольник с оборудованием:");
+                rectOpt.SetRejectMessage("\nВыбран не полилиния.");
+                rectOpt.AddAllowedClass(typeof(Polyline), false);
+                var resRect = ed.GetEntity(rectOpt);
+                if (resRect.Status != PromptStatus.OK) return;
+                ObjectId rectId = resRect.ObjectId;
 
-                List<BlockReference> equipmentBlocks = GetBlocksInsidePolyline(db, equipmentRect, ed);
-                ed.WriteMessage($"\nНайдено блоков оборудования внутри прямоугольника: {equipmentBlocks.Count}");
-                if (equipmentBlocks.Count == 0) return;
+                var pStartOpt = new PromptPointOptions("\nУкажите начальную точку обхода (должна лежать на периметре): ");
+                var resStart = ed.GetPoint(pStartOpt);
+                if (resStart.Status != PromptStatus.OK) return;
+                Point3d startPt = resStart.Value;
 
-                List<Tuple<Point3d, Point3d>> segments = GetPerimeterSegments(perimeter);
-                ed.WriteMessage($"\nПериметр разбит на {segments.Count} сегментов.");
+                var pEndOpt = new PromptPointOptions("\nУкажите конечную точку обхода (должна лежать на периметре): ");
+                var resEnd = ed.GetPoint(pEndOpt);
+                if (resEnd.Status != PromptStatus.OK) return;
+                Point3d endPt = resEnd.Value;
 
-                Point3d startPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку старта размещения:");
-                if (startPt == Point3d.Origin) return;
-
-                Point3d endPt = PromptForPointOnPolyline(ed, perimeter, "\nВыберите точку окончания размещения:");
-                if (endPt == Point3d.Origin) return;
-
-                int startSegmentIndex = FindSegmentIndexByPointOnPolyline(perimeter, startPt);
-                int endSegmentIndex = FindSegmentIndexByPointOnPolyline(perimeter, endPt);
-
-                if (startSegmentIndex == -1 || endSegmentIndex == -1)
+                using (var tr = db.TransactionManager.StartTransaction())
                 {
-                    ed.WriteMessage("\nТочки старта или финиша не лежат на периметре.");
-                    return;
-                }
+                    var perimeter = (Polyline)tr.GetObject(perimeterId, OpenMode.ForRead);
+                    var rect = (Polyline)tr.GetObject(rectId, OpenMode.ForRead);
 
-                List<int> segmentOrder = GetSegmentOrder(startSegmentIndex, endSegmentIndex, segments.Count);
+                    if (!perimeter.Closed)
+                    {
+                        ed.WriteMessage("\nПериметр должен быть замкнутой полилией.");
+                        return;
+                    }
+                    if (!rect.Closed)
+                    {
+                        ed.WriteMessage("\nОбласть оборудования должна быть замкнутой полилией.");
+                        return;
+                    }
 
-                using (Transaction tr = db.TransactionManager.StartTransaction())
-                {
+                    var segments = GetPerimeterSegments(perimeter);
+                    ed.WriteMessage($"\nПериметр разбит на {segments.Count} сегментов.");
+
+                    int startSegmentIndex = FindSegmentIndexByPointOnPolyline(perimeter, startPt);
+                    int endSegmentIndex = FindSegmentIndexByPointOnPolyline(perimeter, endPt);
+
+                    if (startSegmentIndex == -1 || endSegmentIndex == -1)
+                    {
+                        ed.WriteMessage("\nНачальная или конечная точка не на периметре.");
+                        return;
+                    }
+
+                    ed.WriteMessage($"\nСтартовый сегмент: {startSegmentIndex}, конечный сегмент: {endSegmentIndex}");
+
+                    var segmentOrder = GetSegmentOrder(startSegmentIndex, endSegmentIndex, segments.Count);
+
+                    var equipmentBlocks = GetBlocksInsidePolyline(db, rect, ed);
+                    ed.WriteMessage($"\nНайдено блоков: {equipmentBlocks.Count}");
+                    if (equipmentBlocks.Count == 0)
+                    {
+                        ed.WriteMessage("\nОборудование в выбранной области отсутствует.");
+                        return;
+                    }
+
                     BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                     BlockTableRecord ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
 
@@ -67,55 +111,45 @@ namespace StoreLayoutPlugin
 
                     foreach (int segIdx in segmentOrder)
                     {
-                        if (blockIndex >= equipmentBlocks.Count)
-                            break;
+                        if (blockIndex >= equipmentBlocks.Count) break;
 
                         var segment = segments[segIdx];
                         Point3d segStart = segment.Item1;
                         Point3d segEnd = segment.Item2;
 
-                        // ВАЖНО: если это стартовый сегмент, позиция начала равна точке старта (без смещения!)
                         Point3d placeStart = (segIdx == startSegmentIndex) ? startPt : segStart;
-                        // Аналогично для конечного сегмента
                         Point3d placeEnd = (segIdx == endSegmentIndex) ? endPt : segEnd;
 
                         Vector3d segVector = placeEnd - placeStart;
                         double segLength = segVector.Length;
-                        Vector3d segDirection = segVector.GetNormal();
-
-                        // Получаем нормаль, но она теперь нужна только если бы смещали внутрь; тут осталась для возможных проверок
-                        Vector3d insideNormal = GetInsideNormal(perimeter, segIdx);
+                        Vector3d segDir = segVector.GetNormal();
 
                         double currentOffset = 0.0;
 
-                        while (blockIndex < equipmentBlocks.Count && currentOffset <= segLength)
+                        while (blockIndex < equipmentBlocks.Count && currentOffset < segLength)
                         {
                             var blk = equipmentBlocks[blockIndex];
                             Extents3d extents = blk.GeometricExtents;
+                            double length = extents.MaxPoint.X - extents.MinPoint.X;
 
-                            double blockLength = extents.MaxPoint.X - extents.MinPoint.X; // длинная сторона - X
-                            double blockWidth = extents.MaxPoint.Y - extents.MinPoint.Y;
+                            // Проверка, укладывается ли блок с учетом зазора GapBetweenBlocks
+                            if (currentOffset + length + GapBetweenBlocks <= segLength)
+                            {
+                                Point3d position = placeStart + segDir * currentOffset;
 
-                            // Если блок не помещается на оставшемся отрезке - выходим из цикла по сегменту
-                            if (currentOffset + blockLength > segLength)
+                                // Вставляем блок с поворотом вдоль сегмента
+                                CreateBlockReference(tr, ms, blk.Name, position, Math.Atan2(segDir.Y, segDir.X));
+
+                                ed.WriteMessage($"\nРазмещён блок '{blk.Name}' с поворотом {Math.Atan2(segDir.Y, segDir.X) * 180 / Math.PI:F1}° на позиции {position}");
+
+                                currentOffset += length + GapBetweenBlocks;
+                                blockIndex++;
+                            }
+                            else
+                            {
+                                // Если блок не помещается, переходим к следующему сегменту
                                 break;
-
-                            // Позиция блока на линии периметра - длинная сторона блока ориентирована вдоль сегмента
-                            Point3d positionOnSegment = placeStart + segDirection.MultiplyBy(currentOffset + blockLength / 2);
-
-                            // Убираем сдвиг внутрь, позиция ровно по линии
-                            Point3d blockPosition = positionOnSegment; 
-
-                            // Поворот: длинная сторона вдоль направления сегмента
-                            double rotationAngle = Math.Atan2(segDirection.Y, segDirection.X);
-
-                            // Создаём блок в нужном месте с поворотом
-                            CreateBlockReference(tr, ms, blk.Name, blockPosition, rotationAngle);
-
-                            ed.WriteMessage($"\nРазмещён блок '{blk.Name}' с поворотом {rotationAngle * 180.0 / Math.PI:F1}° на позиции {blockPosition}");
-
-                            currentOffset += blockLength + GapBetweenBlocks;
-                            blockIndex++;
+                            }
                         }
                     }
 
@@ -126,88 +160,14 @@ namespace StoreLayoutPlugin
                         ed.WriteMessage($"\nНе размещено блоков: {equipmentBlocks.Count - blockIndex}");
                 }
             }
-            catch (Autodesk.AutoCAD.Runtime.Exception ex)
+            catch (AcadException ex)
             {
                 ed.WriteMessage("\nAutoCAD Runtime ошибка: " + ex.Message);
             }
-            catch (System.Exception ex)
+            catch (SysException ex)
             {
                 ed.WriteMessage("\nОбщая ошибка: " + ex.Message);
             }
-        }
-
-        // Вычисление нормали внутрь полигона для возможного использования (оставляем на будущее)
-        private Vector3d GetInsideNormal(Polyline perimeter, int segIdx)
-        {
-            int n = perimeter.NumberOfVertices;
-
-            Point2d p0 = perimeter.GetPoint2dAt(segIdx);
-            Point2d p1 = perimeter.GetPoint2dAt((segIdx + 1) % n);
-
-            Vector2d edgeVector = p1 - p0;
-            Vector2d normal = edgeVector.GetNormal();
-
-            Vector2d leftNormal = new Vector2d(-normal.Y, normal.X);
-
-            Point2d testPoint = p0 + leftNormal * 0.1;
-
-            bool isInside = IsPointInPolyline(perimeter, testPoint);
-            if (isInside)
-            {
-                return new Vector3d(leftNormal.X, leftNormal.Y, 0);
-            }
-            else
-            {
-                Vector2d rightNormal = new Vector2d(normal.Y, -normal.X);
-                return new Vector3d(rightNormal.X, rightNormal.Y, 0);
-            }
-        }
-
-        // --- Вспомогательные методы из вашего исходного кода (без изменений) ---
-
-        private Polyline PromptForClosedPolyline(Editor ed, string prompt)
-        {
-            var peo = new PromptEntityOptions(prompt);
-            peo.SetRejectMessage("\nВыберите замкнутую полилинию.");
-            peo.AddAllowedClass(typeof(Polyline), exactMatch: true);
-
-            var res = ed.GetEntity(peo);
-            if (res.Status != PromptStatus.OK)
-                return null;
-
-            using (var tr = ed.Document.Database.TransactionManager.StartTransaction())
-            {
-                var pl = tr.GetObject(res.ObjectId, OpenMode.ForRead) as Polyline;
-                if (pl == null || !pl.Closed)
-                {
-                    ed.WriteMessage("\nОбъект не является замкнутой полилинией.");
-                    return null;
-                }
-                tr.Commit();
-                return pl;
-            }
-        }
-
-        private Point3d PromptForPointOnPolyline(Editor ed, Polyline polyline, string prompt)
-        {
-            var ppo = new PromptPointOptions(prompt);
-
-            while (true)
-            {
-                var ppr = ed.GetPoint(ppo);
-                if (ppr.Status != PromptStatus.OK) return Point3d.Origin;
-
-                if (IsPointCloseToPolyline(polyline, ppr.Value, PointTolerance))
-                    return ppr.Value;
-
-                ed.WriteMessage("\nТочка должна находиться на или очень близко к полилинии.");
-            }
-        }
-
-        private bool IsPointCloseToPolyline(Polyline polyline, Point3d pt, double tol)
-        {
-            Point3d closest = polyline.GetClosestPointTo(pt, Vector3d.ZAxis, false);
-            return closest.DistanceTo(pt) <= tol;
         }
 
         private List<Tuple<Point3d, Point3d>> GetPerimeterSegments(Polyline pl)
@@ -255,7 +215,6 @@ namespace StoreLayoutPlugin
             {
                 var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                 var ms = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-
                 foreach (ObjectId id in ms)
                 {
                     Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
@@ -263,12 +222,9 @@ namespace StoreLayoutPlugin
                     {
                         Point3d pos = br.Position;
                         if (IsPointInPolyline(polyline, new Point2d(pos.X, pos.Y)))
-                        {
                             blocks.Add(br);
-                        }
                     }
                 }
-
                 tr.Commit();
             }
             return blocks;
@@ -299,7 +255,6 @@ namespace StoreLayoutPlugin
                 throw new Autodesk.AutoCAD.Runtime.Exception(
                     Autodesk.AutoCAD.Runtime.ErrorStatus.InvalidInput,
                     $"Блок с именем {blockName} не найден.");
-
             ObjectId blockId = bt[blockName];
             BlockReference newBlock = new BlockReference(position, blockId)
             {
@@ -307,7 +262,6 @@ namespace StoreLayoutPlugin
             };
             modelSpace.AppendEntity(newBlock);
             tr.AddNewlyCreatedDBObject(newBlock, true);
-
             return newBlock;
         }
     }
